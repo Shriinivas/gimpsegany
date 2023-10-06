@@ -1,4 +1,4 @@
-## GIMP Plugin For Integration Meta Segment Anything
+## GIMP Plugin For Integration With Meta Segment Anything
 This GIMP plugin integrates with Meta's AI-based tool Segment Anything,  which enables you to effortlessly isolate objects within raster images directly from GIMP. 
 
 ### Installation I - Segment Anything local instance
