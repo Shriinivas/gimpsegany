@@ -43,4 +43,5 @@ You will get the detailed installation instructions about installing Segment Any
 - Box: To isolate a specific object without segmenting everything, draw a selection box around the object you want to isolate. This will restrict the search area for segmentation objects to the selected box
 - Selection: The "Selection" type lets you choose an arbitrary area on the image. The tool passes sample points (the count specified in "Selection Points" edit box). Segment Anything then attempts to identify the object based on these points.
 - Box-Selection: Is a combination of Box and Selection types. It involves a two-step process. First, select a rectangular area, convert it to a path. Then create another selection containing the sample points. Invoke the plugin, choose "Box-Selection" as the Segmentation Type, and, in addition to Selection Points, select the path that corresponds to the rectangular selection.The resulting layers will include colored regions related to the objects within the box, which are associated with the sample points.
-  
+
+### [Detailed Video Tutorial](https://youtu.be/aK8GVp_msbs)
