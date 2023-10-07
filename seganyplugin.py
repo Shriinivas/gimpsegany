@@ -205,7 +205,7 @@ class DialogValue:
         self.segType = 'Auto'
         self.isRandomColor = False
         self.maskColor = [255, 0, 0, 255]
-        self.selPtCnt = 50
+        self.selPtCnt = 10
         self.selBoxPathName = None
 
         try:
