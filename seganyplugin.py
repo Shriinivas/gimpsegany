@@ -20,22 +20,65 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 from gimpfu import pdb, register, main, CLIP_TO_IMAGE, RGBA_IMAGE
 from gimpfu import LAYER_MODE_NORMAL_LEGACY, GRAY, GRAYA_IMAGE
-import tempfile, subprocess
-from subprocess import PIPE
+import tempfile
+import subprocess
 from os.path import exists
 from array import array
-import random, os, glob, struct
+import random
+import os
+import sys
+import glob
+import struct
 import gtk
 import json
+import logging
 
 
-def shellRun(cmdLine, verbose=True):
-    if verbose:
-        print(cmdLine)
-    process = subprocess.Popen(cmdLine, stdout=PIPE, shell=True)
-    process.wait()
-    o0, o1 = process.communicate()
-    return [x.decode() if x is not None else None for x in [o0, o1]]
+# Not used currently (plugin pnly works with python2)
+def getVersion():
+    sys.version_info[0]
+
+
+def configLogging(level):
+    logging.basicConfig(level=level,
+                        format='%(asctime)s - %(levelname)s - %(message)s',
+                        datefmt='%Y-%m-%d %H:%M:%S')
+
+
+def shellRun(cmdArgs, stdoutFile=None, env_vars=None, useos=False):
+    if env_vars is None:
+        env_vars = os.environ.copy()
+
+    cmdLine = " ".join(cmdArgs)
+    logging.info('Running command: %s' % cmdLine)
+    if useos:
+        os.system(cmdLine)
+    else:
+        process = subprocess.Popen(cmdArgs, env=env_vars,
+                                   stdout=subprocess.PIPE
+                                   if not stdoutFile else stdoutFile,
+                                   stderr=subprocess.PIPE, bufsize=1)
+        try:
+            # Processing stdout
+            if process.stdout:
+                for line in iter(process.stdout.readline, ''):
+                    # Decode the line if necessary (Python 2 reads bytes from PIPE)
+                    line = line.decode('utf-8')
+                    print(line,)
+            process.wait()
+
+            if process.returncode != 0:
+                error_message = 'Command failed with the following error:\n '
+                error_lines = [line.decode('utf-8') for line in iter(process.stderr.readline, '')]
+                logging.error(error_message + ''.join(error_lines))
+                return False
+
+        finally:
+            if process.stdout:
+                process.stdout.close()
+            if process.stderr:
+                process.stderr.close()
+    return True
 
 
 def unpackBoolArray(filepath):
@@ -182,12 +225,16 @@ def getPathDict(image):
 
 
 def getBoxCos(image, boxPathDict, pathName):
-    path = boxPathDict[pathName]
+    path = boxPathDict.get(pathName)
+    if path is None:
+        logging.error('Error: Please create a box path and select it')
+        return None
+
     points = path.strokes[0].points[0]
     ptsCnt = len(points)
 
     if ptsCnt != 24:
-        print('Error: Path is not a box!', ptsCnt)
+        logging.error('Error: Path is not a box! ' + str(ptsCnt))
         return None
     else:
         topLeft = [points[2], points[3]]
@@ -220,8 +267,7 @@ class DialogValue:
                 self.maskColor = data.get('maskColor', self.maskColor)
                 self.selPtCnt = data.get('selPtCnt', self.selPtCnt)
         except Exception as e:
-            print("Exception", e)
-            pass
+            logging.info('Error reading json : %s' % e)
 
     def persist(self, filepath):
         data = {
@@ -314,7 +360,7 @@ def optionsDialog(image, boxPathDict):
     values = DialogValue(configFilePath)
 
     pythonPath = values.pythonPath
-    print(pythonPath)
+    logging.debug('pythonPath: %s' % pythonPath)
     modelType = values.modelType
     checkPtPath = values.checkPtPath
     maskType = values.maskType
@@ -481,17 +527,21 @@ def optionsDialog(image, boxPathDict):
 
 
 def plugin_main(image, layer):
+    level = logging.DEBUG  # logging.WARN
+    configLogging(level)
+
     boxPathDict = getPathDict(image)
     values = optionsDialog(image, boxPathDict)
     if values is None:  # Cancelled
         return
 
     if values.checkPtPath is None:
-        print('Please set the Segment Anything checkpoint path.')
+        logging.error('Please set the Segment Anything checkpoint path.')
         return
 
     if values.pythonPath is None:
-        print('Warning: python path is None trying default python executable')
+        logging.warn('Warning: python path is None trying '
+                     'default python executable')
         pythonPath = 'python'
     else:
         pythonPath = values.pythonPath
@@ -512,11 +562,9 @@ def plugin_main(image, layer):
     ipFilePath = filepathPrefix + next(tempfile._get_candidate_names()) \
         + '.png'
 
-    cmd = '%s %s %s %s %s %s %s %s %r' % (pythonPath, scriptFilepath,
-                                          values.modelType, values.checkPtPath,
-                                          ipFilePath, values.segType,
-                                          values.maskType, maskFileNoExt,
-                                          formatBinary)
+    cmd = [pythonPath, scriptFilepath, values.modelType, values.checkPtPath,
+           ipFilePath, values.segType, values.maskType, maskFileNoExt,
+           str(formatBinary)]
 
     newImage = pdb.gimp_image_duplicate(image)
     visLayer = pdb.gimp_image_merge_visible_layers(newImage, CLIP_TO_IMAGE)
@@ -527,16 +575,16 @@ def plugin_main(image, layer):
 
     if values.segType in {'Selection', 'Box-Selection'}:
         exportSelection(image, selFile, values.selPtCnt)
-        cmd += ' ' + selFile
+        cmd.append(selFile)
         if values.segType == 'Box-Selection':
             boxCos = getBoxCos(image, boxPathDict, values.selBoxPathName)
             if boxCos is None:
                 return
-            cmd += ' ' + ','.join(str(co) for co in boxCos)
+            cmd.append(','.join(str(co) for co in boxCos))
     elif values.segType == 'Box':
         exists, x1, y1, x2, y2 = pdb.gimp_selection_bounds(image)
-        cmd += ' sel_place_holder ' + ','.join(str(co)
-                                               for co in [x1, y1, x2, y2])
+        cmd.append('sel_place_holder')
+        cmd.append(','.join(str(co) for co in [x1, y1, x2, y2]))
 
     pdb.gimp_selection_none(image)
     shellRun(cmd)
@@ -548,7 +596,7 @@ def plugin_main(image, layer):
     if channel is not None:
         pdb.gimp_image_select_item(image, 2, channel)
 
-    print('Done!')
+    logging.debug('Finished creating segments!')
 
 
 register(
