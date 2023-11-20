@@ -4,8 +4,10 @@ This GIMP plugin integrates with Meta's AI-based tool Segment Anything,  which e
 ### Installation I - Segment Anything local instance
 You will get the detailed installation instructions about installing Segment Anything on your platform on Meta's github site: https://github.com/facebookresearch/segment-anything. There are three models or checkpoints that are published with the tool, make sure you download at least one of them (the recommended one is vit_h).
 
+Also please ensure the segment-anything you created with `git clone` is in the PYTHONPATH
+
 ### Installation II - Segment Anything GIMP plugin
-- Make sure your GIMP version supports Python-Fu. Open GIMP and check for the "Python-Fu" submenu under "Filters". If you don't see it, you'll need to install a Python-enabled version of GIMP on your machine. Arch Linux users can find an AUR package called "python2-gimp" for this purpose.
+- Make sure your GIMP version supports Python-Fu. Open GIMP and check for the "Python-Fu" submenu under "Filters". If you don't see it, you'll need to install a Python-enabled version of GIMP on your machine. Arch Linux users can find an AUR package called "python2-gimp" for this purpose. Also open the Python-Fu console and make sure the python version of your GIMP installation is 2.7.x.
 - Once you have Python-GIMP installed, download the zip file from the plugin's GitHub location:https://github.com/Shriinivas/gimpsegany and extract the files: seganyplugin.py and seganybridge.py into the GIMP plugin folder. You can find GIMP's user plugin location in the Edit-Preferences menu under the Folders section.
 - Note down the following information:
   - The python3 instance used while running the seganybridge script. In case you're not using any special environment, this will be the default python3 instance. If you've set up a separate environment for Segment Anything - for example pyenv or conda - consult its documentation to determine the python3 path.
