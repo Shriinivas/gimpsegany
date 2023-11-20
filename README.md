@@ -4,7 +4,7 @@ This GIMP plugin integrates with Meta's AI-based tool Segment Anything,  which e
 ### Installation I - Segment Anything local instance
 You will get the detailed installation instructions about installing Segment Anything on your platform on Meta's github site: https://github.com/facebookresearch/segment-anything. There are three models or checkpoints that are published with the tool, make sure you download at least one of them (the recommended one is vit_h).
 
-Also please ensure the segment-anything you created with `git clone` is in the PYTHONPATH
+Also please ensure the segment-anything you created with `git clone` is in the PYTHONPATH. For example, if segment-anything folder is /home/user/programs/segment-anything, then your PYTHONPATH should have /home/user/programs/segment-anything included in it. You can change the .profile on linux or the corresponding file on Windows so that this is available everytime you open GIMP.
 
 ### Installation II - Segment Anything GIMP plugin
 - Make sure your GIMP version supports Python-Fu. Open GIMP and check for the "Python-Fu" submenu under "Filters". If you don't see it, you'll need to install a Python-enabled version of GIMP on your machine. Arch Linux users can find an AUR package called "python2-gimp" for this purpose. Also open the Python-Fu console and make sure the python version of your GIMP installation is 2.7.x.
