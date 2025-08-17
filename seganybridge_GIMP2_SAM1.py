@@ -1,8 +1,8 @@
 '''
-Script to generate Meta Segment Anything 2 masks.
+Script to generate Meta Segment Anything masks.
 
 Adapted from:
-https://github.com/facebookresearch/segment-anything-2
+https://github.com/facebookresearch/segment-anything/blob/main/notebooks/predictor_example.ipynb
 
 Author: Shrinivas Kulkarni
 
@@ -24,11 +24,9 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 import torch
 import numpy as np
 import cv2
-from sam2.build_sam import build_sam2
-from sam2.sam2_image_predictor import SAM2ImagePredictor
-from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+from segment_anything import sam_model_registry, \
+    SamAutomaticMaskGenerator, SamPredictor
 import sys
-import os
 
 
 def packBoolArray(filepath, arr):
@@ -81,27 +79,16 @@ def saveMasks(masks, saveFileNoExt, formatBinary):
         saveMask(filepath, arr, formatBinary)
 
 
-def segmentAuto(sam, cvImage, saveFileNoExt, formatBinary, segRes, cropNLayers, minMaskArea):
+def segmentAuto(sam, cvImage, saveFileNoExt, formatBinary):
     height, width = cvImage.shape[:2]
-    points_per_side = 32
-    if segRes == "Low":
-        points_per_side = 16
-    elif segRes == "High":
-        points_per_side = 64
-
-    mask_generator = SAM2AutomaticMaskGenerator(
-        model=sam,
-        points_per_side=points_per_side,
-        crop_n_layers=cropNLayers,
-        min_mask_region_area=minMaskArea,
-    )
+    mask_generator = SamAutomaticMaskGenerator(sam)
     masks = mask_generator.generate(cvImage)
     masks = [mask['segmentation'] for mask in masks]
     saveMasks(masks, saveFileNoExt, formatBinary)
 
 
 def segmentBox(sam, cvImage, maskType, boxCos, saveFileNoExt, formatBinary):
-    predictor = SAM2ImagePredictor(sam)
+    predictor = SamPredictor(sam)
     predictor.set_image(cvImage)
 
     print('boxCos--->', boxCos)
@@ -125,7 +112,7 @@ def segmentSel(sam, cvImage, maskType, selFile, boxCos, saveFileNoExt,
             cos = line.split(' ')
             pts.append([int(cos[0]), int(cos[1])])
 
-    predictor = SAM2ImagePredictor(sam)
+    predictor = SamPredictor(sam)
     predictor.set_image(cvImage)
 
     input_point = np.array(pts)
@@ -148,25 +135,11 @@ def segmentSel(sam, cvImage, maskType, selFile, boxCos, saveFileNoExt,
     saveMasks(masks, saveFileNoExt, formatBinary)
 
 
-def convert_safetensors_to_pth(safetensors_path, pth_path):
-    """Convert safetensors file to pth format"""
-    try:
-        from safetensors.torch import load_file
-        state_dict = load_file(safetensors_path)
-        # Wrap in the expected format for SAM2
-        checkpoint = {"model": state_dict}
-        torch.save(checkpoint, pth_path)
-        return True
-    except Exception as e:
-        print(f"Error converting safetensors to pth: {e}")
-        return False
-
-
 def runTest(sam):
     npArr = np.zeros((50, 50), np.uint8)
     cvImage = cv2.cvtColor(npArr, cv2.COLOR_GRAY2BGR)
 
-    predictor = SAM2ImagePredictor(sam)
+    predictor = SamPredictor(sam)
     predictor.set_image(cvImage)
 
     input_box = np.array([10, 10, 20, 20])
@@ -178,66 +151,22 @@ def runTest(sam):
     )
 
 
+# python seganybridge.py vit_h /path/to/checkpt /ip/file/path Auto Multiple /tmp/__seg__ True /sel/file/path boxCos
+# Test command: python seganybridge.py vit_h /path/to/checkpt
 def main():
     selFile = None
     modelType = sys.argv[1]
     checkPtFilePath = sys.argv[2]
-    
-    # Map model types to config files for SAM 2.1
-    model_configs = {
-        'sam2_hiera_tiny': 'sam2_hiera_t.yaml',
-        'sam2_hiera_small': 'sam2_hiera_s.yaml', 
-        'sam2_hiera_base_plus': 'sam2_hiera_b+.yaml',
-        'sam2_hiera_large': 'sam2_hiera_l.yaml'
-    }
-    
-    config_file = model_configs.get(modelType, 'sam2_hiera_l.yaml')
-    
-    # Check if checkpoint file exists
-    if not os.path.exists(checkPtFilePath):
-        print(f"Error: Checkpoint file not found: {checkPtFilePath}")
-        return
-    
-    # Handle different file formats
-    actual_checkpoint_path = checkPtFilePath
-    temp_file_created = False
-    
-    if checkPtFilePath.endswith('.safetensors'):
-        print("Converting safetensors to pth format...")
-        temp_pth_path = checkPtFilePath.replace('.safetensors', '_temp.pth')
-        if convert_safetensors_to_pth(checkPtFilePath, temp_pth_path):
-            actual_checkpoint_path = temp_pth_path
-            temp_file_created = True
-            print(f"Converted to: {temp_pth_path}")
-        else:
-            print("Failed to convert safetensors file")
-            return
-    
-    # Load the model
-    try:
-        sam = build_sam2(config_file, actual_checkpoint_path)
-        print("Model loaded successfully!")
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        # Clean up temp file if created
-        if temp_file_created and os.path.exists(actual_checkpoint_path):
-            os.remove(actual_checkpoint_path)
-        return
-    
+    sam = sam_model_registry[modelType](checkpoint=checkPtFilePath)
     if torch.cuda.is_available():
         sam.to(device='cuda')
-        print("Model moved to CUDA")
-        
     if len(sys.argv) == 3:
         runTest(sam)
         print('Success!!')
-        # Clean up temporary file if created
-        if temp_file_created and os.path.exists(actual_checkpoint_path):
-            os.remove(actual_checkpoint_path)
         return
 
     ipFile = sys.argv[3]
-    segType = sys.argv[4]  # Auto, Selection, Box, Box-Selection
+    segType = sys.argv[4]  # auto, selection
     maskType = sys.argv[5]  # Multiple, Single
     saveFileNoExt = sys.argv[6]
     formatBinary = True
@@ -245,40 +174,33 @@ def main():
     if len(sys.argv) > 7:
         formatBinary = sys.argv[7] == 'True'
 
+    if len(sys.argv) > 8:
+        selFile = sys.argv[8]
+    elif segType == 'selection':
+        print('Please specify selection file path as the last argument')
+        assert False
+
+    boxCos = None
+    if len(sys.argv) > 9:
+        boxCos = [float(val.strip()) for val in sys.argv[9].split(',')]
+    elif segType in {'Box', 'Box-Selection'}:
+        print('Please specify box top left and bottom-right coordinates')
+        assert False
+
     cvImage = cv2.imread(ipFile)
     cvImage = cv2.cvtColor(cvImage, cv2.COLOR_BGR2RGB)
 
     if segType == 'Auto':
-        segRes = "Medium"
-        cropNLayers = 0
-        minMaskArea = 0
-        if len(sys.argv) > 8:
-            segRes = sys.argv[8]
-        if len(sys.argv) > 9:
-            cropNLayers = int(sys.argv[9])
-        if len(sys.argv) > 10:
-            minMaskArea = int(sys.argv[10])
-        segmentAuto(sam, cvImage, saveFileNoExt, formatBinary, segRes, cropNLayers, minMaskArea)
+        segmentAuto(sam, cvImage, saveFileNoExt, formatBinary)
     elif segType in {'Selection', 'Box-Selection'}:
-        selFile = sys.argv[8]
-        boxCos = None
-        if len(sys.argv) > 9:
-            boxCos = [float(val.strip()) for val in sys.argv[9].split(',')]
         segmentSel(sam, cvImage, maskType, selFile, boxCos, saveFileNoExt,
                    formatBinary)
     elif segType == 'Box':
-        boxCos = [float(val.strip()) for val in sys.argv[8].split(',')]
         segmentBox(sam, cvImage, maskType, boxCos, saveFileNoExt, formatBinary)
     else:
-        print(f"Unknown segmentation type: {segType}")
-        return
+        assert False
 
     print('Done!')
-    
-    # Clean up temporary file if created
-    if temp_file_created and os.path.exists(actual_checkpoint_path):
-        os.remove(actual_checkpoint_path)
 
 
-if __name__ == "__main__":
-    main()
+main()

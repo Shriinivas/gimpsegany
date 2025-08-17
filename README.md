@@ -1,49 +1,124 @@
 ## GIMP Plugin For Integration With Meta Segment Anything
-This GIMP plugin integrates with Meta's AI-based tool Segment Anything,  which enables you to effortlessly isolate objects within raster images directly from GIMP. 
 
-### Installation I - Segment Anything local instance
+## Downloads
+
+You can download the latest version of the plugins from the [GitHub Releases page](https://github.com/Shriinivas/gimpsegany/releases/latest).
+
+- `gimp-segany-gimp3.zip`: For GIMP 3
+- `gimp-segany-gimp2.zip`: For GIMP 2
+
+Download the appropriate zip file and extract it in the GIMP plug-ins folder. For GIMP 3, you should extract the contents to `plug-ins/seganyplugin/`.
+
+---
+
+This GIMP plugin integrates with Meta's AI-based tool Segment Anything, which enables you to effortlessly isolate objects within raster images directly from GIMP.
+
+This plugin supports both GIMP 2 and GIMP 3, using Segment Anything 1 and 2 respectively.
+
+---
+
+## Installation
+
+### Plugin Installation
+
+Please refer to the [Downloads](#downloads) section for instructions on how to download and install the plugin.
+
+You can find GIMP's user plugin location in the `Edit > Preferences` menu under the `Folders` section. For GIMP 3, you may need to create the `plug-ins` directory if it does not already exist. Here are the default locations for each operating system:
+
+- **Windows:** `C:\Users\[YourUsername]\AppData\Roaming\GIMP\3.0\plug-ins\`
+- **Linux:** `~/.config/GIMP/3.0/plug-ins/`
+- **macOS:** `~/Library/Application Support/GIMP/3.0/plug-ins/`
+
+Make sure the plugin script (`seganyplugin.py` or `seganyplugin_GIMP2.py`) is executable.
+
+### Segment Anything 2 Installation (for GIMP 3 Plugin)
+
+You will get the detailed installation instructions about installing Segment Anything 2 on your platform on Meta's github site: https://github.com/facebookresearch/segment-anything-2.
+
+**Prerequisites:**
+
+- Python 3.10 or higher
+- PyTorch 2.3.1 or higher
+
+**Installation Steps:**
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/facebookresearch/segment-anything-2.git
+   ```
+2. Navigate to the directory:
+   ```bash
+   cd segment-anything-2
+   ```
+3. Install the package:
+   ```bash
+   pip install -e .
+   ```
+4. Download a model checkpoint. There are several sizes available, such as Tiny, Small, Base Plus, and Large.
+
+Also please ensure the `segment-anything-2` you created with `git clone` is in the PYTHONPATH. For example, if `segment-anything-2` folder is `/home/user/programs/segment-anything-2`, then your PYTHONPATH should have `/home/user/programs/segment-anything-2` included in it. You can change the .profile on linux or the corresponding file on Windows so that this is available everytime you open GIMP.
+
+**Bridge Test (GIMP 3):**
+Perform a quick check to ensure your Segment Anything 2 installation is working properly. Open a console and change direcotry to your GIMP plugin folder. Execute the following command:
+
+```
+/path/to/python3/python ./seganybridge.py sam2_hiera_large /path/to/checkpoint/model/sam2_hiera_large.pth
+```
+
+"Success!!" message in the console after running the command indicates successful installation of Segment Anything 2. Any exceptions you encounter may be resolved by referring to the Segment Anything 2 site.
+
+### Segment Anything 1 Installation (for GIMP 2 Plugin)
+
 You will get the detailed installation instructions about installing Segment Anything on your platform on Meta's github site: https://github.com/facebookresearch/segment-anything. There are three models or checkpoints that are published with the tool, make sure you download at least one of them (the recommended one is vit_h).
 
-Also please ensure the segment-anything you created with `git clone` is in the PYTHONPATH. For example, if segment-anything folder is /home/user/programs/segment-anything, then your PYTHONPATH should have /home/user/programs/segment-anything included in it. You can change the .profile on linux or the corresponding file on Windows so that this is available everytime you open GIMP.
+Also please ensure the `segment-anything` you created with `git clone` is in the PYTHONPATH. For example, if `segment-anything` folder is `/home/user/programs/segment-anything`, then your PYTHONPATH should have `/home/user/programs/segment-anything` included in it. You can change the .profile on linux or the corresponding file on Windows so that this is available everytime you open GIMP.
 
-### Installation II - Segment Anything GIMP plugin
-- Make sure your GIMP version supports Python-Fu. Open GIMP and check for the "Python-Fu" submenu under "Filters". If you don't see it, you'll need to install a Python-enabled version of GIMP on your machine. Arch Linux users can find an AUR package called "python2-gimp" for this purpose. Also open the Python-Fu console and make sure the python version of your GIMP installation is 2.7.x.
-- Once you have Python-GIMP installed, download the zip file from the plugin's GitHub location:https://github.com/Shriinivas/gimpsegany and extract the files: seganyplugin.py and seganybridge.py into the GIMP plugin folder. You can find GIMP's user plugin location in the Edit-Preferences menu under the Folders section. Make seganyplugin.py executable i.e. ensure that it has execute permissions.
-- Note down the following information:
-  - The python3 instance used while running the seganybridge script. In case you're not using any special environment, this will be the default python3 instance. If you've set up a separate environment for Segment Anything - for example pyenv or conda - consult its documentation to determine the python3 path.
-  - The location of the checkpoint files that you downloaded, which you want Segment Anything to use
-- Perform a quick check to ensure your Segment Anything installation is working properly. Open console and change direcotry to gimp plugin-folder. Execute the following command:
-    ```
-    /path/to/python3/python ./seganybridge.py vit_h /path/to/checkpoint/model/sam_vit_h_4b8939.pth
-    ```
-    "Success!" message in the console after running the command indicates successful installation of Segment Anything. Any exceptions you encounter may be resolved by referring to the Segment Anything site.
+**Bridge Test (GIMP 2):**
+Perform a quick check to ensure your Segment Anything installation is working properly. Open a console and change direcotry to your GIMP plugin folder. Execute the following command:
 
-### Plugin Usage
-- Open GIMP. Under the "Image" menu, you should see a new submenu called "Segment Anything Layers." 
-- Open an image file
-- Click on "Segment Anything Layers," which will bring up the following dialog box
-- 
-![image](https://github.com/Shriinivas/gimpsegany/assets/42069100/b90c67bc-1529-4bd3-8df0-950e45e1e871)
+```
+/path/to/python3/python ./seganybridge_SAM1.py vit_h /path/to/checkpoint/model/sam_vit_h_4b8939.pth
+```
 
-  - Choose the Python instance path discussed earlier in the 'Python3 Path' file chooser. 
-  - Select the checkpoint type (e. g. vit_h) from the Checkpoint Type dropdown
-  - Select the corresponding checkpoint file in Checkpoint Path fie chooser
-  - Choose one of the four Segmentation Types (explanation below)
-  - If you check the Random Mask Color the generated layers will have random color mask regions. Otherwise you can choose a specific color for mask regions in the new layers
-  - In case of Segmentation Type other than Auto, there will be another dropdown allowing you to choose the mask type. With "Multiple" more than one layer will be created and with "Single" only one layer with mask having maximum AI probability is created. 
-  - Click "OK"
-  - The plugin creates a new layer group with one or more layers, each will have a specific region filled with mask color representing a potential object.
-  - Find the mask layer corresponding to the object you want to isolate.
-  - Select that layer and use the "Fuzzy Selection" tool.
-  - Click anywhere within the mask area, optionally adding a one or two-pixel feather for smoothness. This will select the entire area which corresponds to the object.
-  - Now hide the newly created layer group, select the image layer
-  - You can cut the selection area and paste it as new layer. And by hiding the image layer now you get the desired object isolated.
-  - Alternately you can perform GIMP image operations, like colorization, on the image selection (the object)
-  
-#### Segmentation Types
-- Auto: The "Auto" Segmentation Type lets Segment Anything decide the objects automatically. With this type selected, a number of layers are created since Segment Anything tries to isolate every possible object. If you're running GIMP via the console, you can see the commands getting executed and the layers being created.
-- Box: To isolate a specific object without segmenting everything, draw a selection box around the object you want to isolate. This will restrict the search area for segmentation objects to the selected box
-- Selection: The "Selection" type lets you choose an arbitrary area on the image. The tool passes sample points (the count specified in "Selection Points" edit box). Segment Anything then attempts to identify the object based on these points.
-- Box-Selection: Is a combination of Box and Selection types. It involves a two-step process. First, select a rectangular area, convert it to a path. Then create another selection containing the sample points. Invoke the plugin, choose "Box-Selection" as the Segmentation Type, and, in addition to Selection Points, select the path that corresponds to the rectangular selection.The resulting layers will include colored regions related to the objects within the box, which are associated with the sample points.
+"Success!" message in the console after running the command indicates successful installation of Segment Anything. Any exceptions you encounter may be resolved by referring to the Segment Anything site.
 
-### [Detailed Video Tutorial](https://youtu.be/xyuSe0SaMHk)
+---
+
+## Plugin Usage
+
+- Open GIMP. Under the "Image" menu, you should see a new submenu called "Segment Anything Layers".
+- Open an image file and click on the plugin's menu item to bring up the dialog box.
+
+**Plugin UI (GIMP 3):**
+
+[//]: # "Add a screenshot of the GIMP 3 plugin UI here"
+
+### Options
+
+- **Python3 Path:** The path to the python3 instance used while running the seganybridge script.
+- **Checkpoint Type / SAM2 Model Type:** The type of the Segment Anything model to use.
+- **Checkpoint Path:** The path to the downloaded Segment Anything model checkpoint file.
+- **Segmentation Type:** The method to be used for segmentation.
+  - **Auto (GIMP 2 & 3):** Automatically segments the entire image.
+  - **Box (GIMP 2 & 3):** Segments objects within a user-drawn rectangular selection.
+  - **Selection (GIMP 2 & 3):** Segments objects based on sample points from a user-drawn selection.
+  - **Box-Selection (GIMP 2 only):** A two-step process combining a box and selection points.
+- **Mask Type:**
+  - **Multiple:** Creates a separate layer for each potential object.
+  - **Single:** Creates a single layer with the mask that has the highest AI probability.
+- **Random Mask Color:** If checked, the generated layers will have random colors. Otherwise, a specific color can be chosen.
+
+#### GIMP 3 Specific Options (for "Auto" Segmentation)
+
+- **Segmentation Resolution:** Controls the density of the segmentation grid. Higher values will generate more masks but will be slower. (Options: Low, Medium, High)
+- **Crop n Layers:** Enables segmentation on smaller, overlapping crops of the image, which can improve accuracy for smaller objects.
+- **Minimum Mask Area:** Discards small, irrelevant masks.
+
+### Workflow
+
+1.  Select your desired options in the plugin dialog and click "OK".
+2.  The plugin will create a new layer group with one or more mask layers.
+3.  Find the mask layer corresponding to the object you want to isolate.
+4.  Select that layer and use the "Fuzzy Selection" tool to select the mask area.
+5.  Hide the new layer group and select your original image layer.
+6.  You can now cut, copy, or perform any other GIMP operation on the selected object.

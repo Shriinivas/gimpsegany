@@ -1,25 +1,22 @@
-'''
-Gimp plugin for integration with Meta Segment Anything
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-Copyright (C) 2023  Shrinivas Kulkarni
+import gi
 
-This program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 3 of the License, or
-(at your option) any later version.
+gi.require_version("Gimp", "3.0")
+from gi.repository import Gimp
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+gi.require_version("GimpUi", "3.0")
+from gi.repository import GimpUi
 
-You should have received a copy of the GNU General Public License along
-with this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-'''
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk
 
-from gimpfu import pdb, register, main, CLIP_TO_IMAGE, RGBA_IMAGE
-from gimpfu import LAYER_MODE_NORMAL_LEGACY, GRAY, GRAYA_IMAGE
+gi.require_version("Gegl", "0.4")
+from gi.repository import GObject, Gio, Gegl
+from gi.repository import GLib
+
+
 import tempfile
 import subprocess
 from os.path import exists
@@ -29,20 +26,252 @@ import os
 import sys
 import glob
 import struct
-import gtk
 import json
 import logging
 
-
-# Not used currently (plugin pnly works with python2)
-def getVersion():
-    sys.version_info[0]
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk
 
 
-def configLogging(level):
-    logging.basicConfig(level=level,
-                        format='%(asctime)s - %(levelname)s - %(message)s',
-                        datefmt='%Y-%m-%d %H:%M:%S')
+class DialogValue:
+    def __init__(self, filepath):
+        data = None
+        self.pythonPath = None
+        self.modelType = "sam2_hiera_large"
+        self.checkPtPath = None
+        self.maskType = "Multiple"
+        self.segType = "Auto"
+        self.isRandomColor = False
+        self.maskColor = [255, 0, 0, 255]
+        self.selPtCnt = 10
+        self.selBoxPathName = None
+        self.segRes = "Medium"
+        self.cropNLayers = 0
+        self.minMaskArea = 0
+
+        try:
+            with open(filepath, "r") as f:
+                data = json.load(f)
+                self.pythonPath = data.get("pythonPath", self.pythonPath)
+                self.modelType = data.get("modelType", self.modelType)
+                self.checkPtPath = data.get("checkPtPath", self.checkPtPath)
+                self.maskType = data.get("maskType", self.maskType)
+                self.segType = data.get("segType", self.segType)
+                self.isRandomColor = data.get("isRandomColor", self.isRandomColor)
+                self.maskColor = data.get("maskColor", self.maskColor)
+                self.selPtCnt = data.get("selPtCnt", self.selPtCnt)
+                self.segRes = data.get("segRes", self.segRes)
+                self.cropNLayers = data.get("cropNLayers", self.cropNLayers)
+                self.minMaskArea = data.get("minMaskArea", self.minMaskArea)
+        except Exception as e:
+            logging.info("Error reading json : %s" % e)
+
+    def persist(self, filepath):
+        data = {
+            "pythonPath": self.pythonPath,
+            "modelType": self.modelType,
+            "checkPtPath": self.checkPtPath,
+            "maskType": self.maskType,
+            "segType": self.segType,
+            "isRandomColor": self.isRandomColor,
+            "maskColor": self.maskColor,
+            "selPtCnt": self.selPtCnt,
+            "segRes": self.segRes,
+            "cropNLayers": self.cropNLayers,
+            "minMaskArea": self.minMaskArea,
+        }
+        with open(filepath, "w") as f:
+            json.dump(data, f)
+
+
+class OptionsDialog(Gtk.Dialog):
+    def __init__(self, image, boxPathDict):
+        Gtk.Dialog.__init__(
+            self, title="Segment Anything 2", transient_for=None, flags=0
+        )
+        self.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK
+        )
+
+        self.set_default_size(400, 200)
+
+        self.boxPathNames = sorted(boxPathDict.keys())
+        boxPathExist = len(self.boxPathNames) > 0
+        isGrayScale = image.get_base_type() == Gimp.ImageType.GRAYA_IMAGE
+        scriptDir = os.path.dirname(os.path.abspath(__file__))
+        self.configFilePath = os.path.join(scriptDir, "segany_settings.json")
+
+        self.values = DialogValue(self.configFilePath)
+
+        grid = Gtk.Grid()
+        grid.set_column_spacing(10)
+        grid.set_row_spacing(10)
+        grid.set_margin_start(10)
+        grid.set_margin_end(10)
+        grid.set_margin_top(10)
+        grid.set_margin_bottom(10)
+        self.get_content_area().add(grid)
+
+        # Python Path
+        pythonFileLbl = Gtk.Label(label="Python3 Path:", xalign=1)
+        self.pythonFileBtn = Gtk.FileChooserButton(title="Select Python Path")
+        if self.values.pythonPath is not None:
+            self.pythonFileBtn.set_filename(self.values.pythonPath)
+        grid.attach(pythonFileLbl, 0, 0, 1, 1)
+        grid.attach(self.pythonFileBtn, 1, 0, 1, 1)
+
+        # Checkpoint Type
+        modelTypeLbl = Gtk.Label(label="SAM2 Model Type:", xalign=1)
+        self.modelTypeDropDown = Gtk.ComboBoxText()
+        self.modelTypeVals = [
+            "sam2_hiera_large",
+            "sam2_hiera_base_plus",
+            "sam2_hiera_small",
+            "sam2_hiera_tiny",
+        ]
+        for value in self.modelTypeVals:
+            self.modelTypeDropDown.append_text(value)
+        self.modelTypeDropDown.set_active(
+            self.modelTypeVals.index(self.values.modelType)
+        )
+        grid.attach(modelTypeLbl, 0, 1, 1, 1)
+        grid.attach(self.modelTypeDropDown, 1, 1, 1, 1)
+
+        # Checkpoint Path
+        checkPtFileLbl = Gtk.Label(
+            label="SAM2 Checkpoint (.pt/.safetensors):", xalign=1
+        )
+        self.checkPtFileBtn = Gtk.FileChooserButton(title="Select SAM2 Checkpoint Path")
+        if self.values.checkPtPath is not None:
+            self.checkPtFileBtn.set_filename(self.values.checkPtPath)
+        grid.attach(checkPtFileLbl, 0, 2, 1, 1)
+        grid.attach(self.checkPtFileBtn, 1, 2, 1, 1)
+
+        # Segmentation Type
+        segTypeLbl = Gtk.Label(label="Segmentation Type:", xalign=1)
+        self.segTypeDropDown = Gtk.ComboBoxText()
+        self.segTypeVals = ["Auto", "Box", "Selection"]
+        for value in self.segTypeVals:
+            self.segTypeDropDown.append_text(value)
+        self.segTypeDropDown.set_active(self.segTypeVals.index(self.values.segType))
+        grid.attach(segTypeLbl, 0, 3, 1, 1)
+        grid.attach(self.segTypeDropDown, 1, 3, 1, 1)
+
+        # Mask Type
+        self.maskTypeLbl = Gtk.Label(label="Mask Type:", xalign=1)
+        self.maskTypeDropDown = Gtk.ComboBoxText()
+        self.maskTypeVals = ["Multiple", "Single"]
+        for value in self.maskTypeVals:
+            self.maskTypeDropDown.append_text(value)
+        self.maskTypeDropDown.set_active(self.maskTypeVals.index(self.values.maskType))
+        grid.attach(self.maskTypeLbl, 0, 4, 1, 1)
+        grid.attach(self.maskTypeDropDown, 1, 4, 1, 1)
+
+        # Selection Points
+        self.selPtsLbl = Gtk.Label(label="Selection Points:", xalign=1)
+        self.selPtsEntry = Gtk.Entry()
+        self.selPtsEntry.set_text(str(self.values.selPtCnt))
+        grid.attach(self.selPtsLbl, 0, 5, 1, 1)
+        grid.attach(self.selPtsEntry, 1, 5, 1, 1)
+
+        # ... (previous UI elements)
+
+        # Segmentation Resolution
+        self.segResLbl = Gtk.Label(label="Segmentation Resolution:", xalign=1)
+        self.segResDropDown = Gtk.ComboBoxText()
+        self.segResVals = ["Low", "Medium", "High"]
+        for value in self.segResVals:
+            self.segResDropDown.append_text(value)
+        self.segResDropDown.set_active(self.segResVals.index(self.values.segRes))
+        grid.attach(self.segResLbl, 0, 6, 1, 1)
+        grid.attach(self.segResDropDown, 1, 6, 1, 1)
+
+        # Crop n Layers
+        self.cropNLayersLbl = Gtk.Label(label="Crop n Layers:", xalign=1)
+        self.cropNLayersChk = Gtk.CheckButton()
+        self.cropNLayersChk.set_active(self.values.cropNLayers > 0)
+        grid.attach(self.cropNLayersLbl, 0, 7, 1, 1)
+        grid.attach(self.cropNLayersChk, 1, 7, 1, 1)
+
+        # Minimum Mask Area
+        self.minMaskAreaLbl = Gtk.Label(label="Minimum Mask Area:", xalign=1)
+        self.minMaskAreaEntry = Gtk.Entry()
+        self.minMaskAreaEntry.set_text(str(self.values.minMaskArea))
+        grid.attach(self.minMaskAreaLbl, 0, 8, 1, 1)
+        grid.attach(self.minMaskAreaEntry, 1, 8, 1, 1)
+
+        # Mask Color
+        if not isGrayScale:
+            self.randColBtn = Gtk.CheckButton(label="Random Mask Color")
+            self.randColBtn.set_active(self.values.isRandomColor)
+            grid.attach(self.randColBtn, 1, 9, 1, 1)
+
+            self.maskColorLbl = Gtk.Label(label="Mask Color:", xalign=1)
+            self.maskColorBtn = Gtk.ColorButton()
+            rgba = Gdk.RGBA()
+            rgba.parse(
+                f"rgb({self.values.maskColor[0]},{self.values.maskColor[1]},{self.values.maskColor[2]})"
+            )
+            self.maskColorBtn.set_rgba(rgba)
+            grid.attach(self.maskColorLbl, 0, 10, 1, 1)
+            grid.attach(self.maskColorBtn, 1, 10, 1, 1)
+
+        self.segTypeDropDown.connect("changed", self.on_seg_type_changed)
+        if not isGrayScale:
+            self.randColBtn.connect("toggled", self.on_random_toggled)
+
+        self.on_seg_type_changed(self.segTypeDropDown)
+        if not isGrayScale:
+            self.on_random_toggled(self.randColBtn)
+
+        self.show_all()
+
+    def on_seg_type_changed(self, widget):
+        segType = self.segTypeVals[self.segTypeDropDown.get_active()]
+        isAuto = segType == "Auto"
+        self.selPtsLbl.set_visible(segType in ["Selection"])
+        self.selPtsEntry.set_visible(segType in ["Selection"])
+        self.maskTypeLbl.set_visible(segType not in ["Auto", "Box"])
+        self.maskTypeDropDown.set_visible(segType not in ["Auto", "Box"])
+        self.segResLbl.set_visible(isAuto)
+        self.segResDropDown.set_visible(isAuto)
+        self.cropNLayersLbl.set_visible(isAuto)
+        self.cropNLayersChk.set_visible(isAuto)
+        self.minMaskAreaLbl.set_visible(isAuto)
+        self.minMaskAreaEntry.set_visible(isAuto)
+
+    def on_random_toggled(self, widget):
+        is_random = self.randColBtn.get_active()
+        self.maskColorLbl.set_visible(not is_random)
+        self.maskColorBtn.set_visible(not is_random)
+
+    def get_values(self):
+        self.values.pythonPath = self.pythonFileBtn.get_filename()
+        self.values.modelType = self.modelTypeVals[self.modelTypeDropDown.get_active()]
+        self.values.checkPtPath = self.checkPtFileBtn.get_filename()
+        self.values.segType = self.segTypeVals[self.segTypeDropDown.get_active()]
+        self.values.maskType = self.maskTypeVals[self.maskTypeDropDown.get_active()]
+        if hasattr(self, "randColBtn"):
+            self.values.isRandomColor = self.randColBtn.get_active()
+            rgba = self.maskColorBtn.get_rgba()
+            self.values.maskColor = [
+                int(rgba.red * 255),
+                int(rgba.green * 255),
+                int(rgba.blue * 255),
+                255,
+            ]
+        self.values.selPtCnt = int(self.selPtsEntry.get_text())
+        self.values.segRes = self.segResVals[self.segResDropDown.get_active()]
+        self.values.cropNLayers = 1 if self.cropNLayersChk.get_active() else 0
+        self.values.minMaskArea = int(self.minMaskAreaEntry.get_text())
+        # if self.boxPathNameDropDown:
+        #    self.values.selBoxPathName = self.boxPathNames[self.boxPathNameDropDown.get_active()]
+        self.values.persist(self.configFilePath)
+        return self.values
+
+
+def getPathDict(image):
+    return {}
 
 
 def shellRun(cmdArgs, stdoutFile=None, env_vars=None, useos=False):
@@ -50,27 +279,33 @@ def shellRun(cmdArgs, stdoutFile=None, env_vars=None, useos=False):
         env_vars = os.environ.copy()
 
     cmdLine = " ".join(cmdArgs)
-    logging.info('Running command: %s' % cmdLine)
+    logging.info("Running command: %s" % cmdLine)
     if useos:
         os.system(cmdLine)
     else:
-        process = subprocess.Popen(cmdArgs, env=env_vars,
-                                   stdout=subprocess.PIPE
-                                   if not stdoutFile else stdoutFile,
-                                   stderr=subprocess.PIPE, bufsize=1)
+        process = subprocess.Popen(
+            cmdArgs,
+            env=env_vars,
+            stdout=subprocess.PIPE if not stdoutFile else stdoutFile,
+            stderr=subprocess.PIPE,
+        )
         try:
             # Processing stdout
             if process.stdout:
-                for line in iter(process.stdout.readline, ''):
-                    # Decode the line if necessary (Python 2 reads bytes from PIPE)
-                    line = line.decode('utf-8')
-                    print(line,)
+                for line in iter(process.stdout.readline, b""):
+                    # Decode the line if necessary (Python 3 reads bytes from PIPE)
+                    line = line.decode("utf-8")
+                    print(
+                        line,
+                    )
             process.wait()
 
             if process.returncode != 0:
-                error_message = 'Command failed with the following error:\n '
-                error_lines = [line.decode('utf-8') for line in iter(process.stderr.readline, '')]
-                logging.error(error_message + ''.join(error_lines))
+                error_message = "Command failed with the following error:\n "
+                error_lines = [
+                    line.decode("utf-8") for line in iter(process.stderr.readline, b"")
+                ]
+                logging.error(error_message + "".join(error_lines))
                 return False
 
         finally:
@@ -82,7 +317,7 @@ def shellRun(cmdArgs, stdoutFile=None, env_vars=None, useos=False):
 
 
 def unpackBoolArray(filepath):
-    with open(filepath, 'rb') as file:
+    with open(filepath, "rb") as file:
         packed_data = bytearray(file.read())
 
     byte_index = 8  # Skip the first 8 bytes for num_rows and num_cols
@@ -115,20 +350,29 @@ def unpackBoolArray(filepath):
 def readMaskFile(filepath, formatBinary):
     if formatBinary:
         return unpackBoolArray(filepath)
-    else:  # Ony for testing
+    else:
         mask = []
-        with open(filepath, 'r') as f:
+        with open(filepath, "r") as f:
             lines = f.readlines()
         for line in lines:
-            # print(line)
-            mask.append([val == '1' for val in line])
-            # print(mask[-1])
+            mask.append([val == "1" for val in line])
         return mask
 
 
 def exportSelection(image, expfile, exportCnt):
-    # maxCos = 50
-    exists, x1, y1, x2, y2 = pdb.gimp_selection_bounds(image)
+    procedure = Gimp.get_pdb().lookup_procedure("gimp-selection-bounds")
+    config = procedure.create_config()
+    config.set_property("image", image)
+    result = procedure.run(config)
+    non_empty = result.index(1)
+    x1 = result.index(2)
+    y1 = result.index(3)
+    x2 = result.index(4)
+    y2 = result.index(5)
+
+    if not non_empty:
+        return
+
     coords = []
     numPts = (x2 - x1) * (y2 - y1)
     if exportCnt >= numPts:
@@ -136,14 +380,22 @@ def exportSelection(image, expfile, exportCnt):
     else:
         selIdxs = random.sample(range(numPts), exportCnt)
     for selIdx in selIdxs:
-        x = x1 + selIdx % (x2-x1)
-        y = y1 + int(selIdx / (x2-x1))
-        value = pdb.gimp_selection_value(image, x, y)
+        x = x1 + selIdx % (x2 - x1)
+        y = y1 + int(selIdx / (x2 - x1))
+
+        procedure = Gimp.get_pdb().lookup_procedure("gimp-selection-value")
+        config = procedure.create_config()
+        config.set_property("image", image)
+        config.set_property("x", float(x))
+        config.set_property("y", float(y))
+        result = procedure.run(config)
+        value = result.index(1)
+
         if value > 200:
             coords.append((x, y))
-    with open(expfile, 'w') as f:
+    with open(expfile, "w") as f:
         for co in coords:
-            f.write(str(co[0]) + ' ' + str(co[1]) + '\n')
+            f.write(str(co[0]) + " " + str(co[1]) + "\n")
 
 
 def getRandomColor(layerCnt):
@@ -160,53 +412,71 @@ def getRandomColor(layerCnt):
     return list(uniqueColors)
 
 
-def createLayers(image, maskFileNoExt, userSelColor, formatBinary):
-    width, height = image.width, image.height
+def createLayers(image, maskFileNoExt, userSelColor, formatBinary, values):
+    width, height = image.get_width(), image.get_height()
 
     idx = 0
     maxLayers = 99999
 
-    parent = pdb.gimp_layer_group_new(image)
-    pdb.gimp_image_insert_layer(image, parent, None, 0)
-    pdb.gimp_layer_set_opacity(parent, 50)
+    parent = Gimp.GroupLayer.new(image)
+    parent.set_name(f"Segment Anything - {values.segType}")
+    image.insert_layer(parent, None, 0)
+    parent.set_opacity(50)
 
     uniqueColors = getRandomColor(layerCnt=999)
 
-    if image.base_type == GRAY:
-        layerType = GRAYA_IMAGE
+    if image.get_base_type() == Gimp.ImageType.GRAYA_IMAGE:
+        layerType = Gimp.ImageType.GRAYA_IMAGE
         userSelColor = [100, 255]
+        babl_format = "YA u8"
+        pix_size = 2
     else:
-        layerType = RGBA_IMAGE
+        layerType = Gimp.ImageType.RGBA_IMAGE
+        babl_format = "RGBA u8"
+        pix_size = 4
 
     while idx < maxLayers:
-        filepath = maskFileNoExt + str(idx) + '.seg'
+        filepath = maskFileNoExt + str(idx) + ".seg"
         if exists(filepath):
-            print('Creating Layer..', (idx + 1))
-            newlayer = pdb.gimp_layer_new(image, width, height,
-                                          layerType, 'Segment Auto', 100,
-                                          LAYER_MODE_NORMAL_LEGACY)
-            pdb.gimp_image_insert_layer(image, newlayer, parent, 0)
-            pdb.gimp_item_set_visible(newlayer, False)
-            rgn = newlayer.get_pixel_rgn(0, 0, width, height, True, True)
-            pixSize = len(rgn[0, 0])
+            print("Creating Layer..", (idx + 1))
+            newlayer = Gimp.Layer.new(
+                image,
+                f"Mask - {values.segType} #{idx + 1}",
+                width,
+                height,
+                layerType,
+                100.0,
+                Gimp.LayerMode.NORMAL,
+            )
+            image.insert_layer(newlayer, parent, 0)
+            newlayer.set_visible(False)
 
-            pixels = array("B", "\x00" * (width * height * pixSize))
+            buffer = newlayer.get_buffer()
+            rect = Gegl.Rectangle.new(0, 0, width, height)
 
             maskVals = readMaskFile(filepath, formatBinary)
-            maskColor = userSelColor if userSelColor is not None \
+            maskColor = (
+                userSelColor
+                if userSelColor is not None
                 else list(uniqueColors[idx]) + [255]
-            x = 0
-            for line in maskVals:
-                for y, p in enumerate(line):
+            )
+
+            mask_color_bytes = bytes(maskColor)
+            transparent_pixel = bytes(pix_size)
+            row_byte_strings = []
+            for row in maskVals:
+                row_pixels = []
+                for p in row:
                     if p:
-                        pos = (y + width * x) * pixSize
-                        pixels[pos: pos + pixSize] = \
-                            array('B', maskColor)
-                x += 1
+                        row_pixels.append(mask_color_bytes)
+                    else:
+                        row_pixels.append(transparent_pixel)
+                row_byte_strings.append(b"".join(row_pixels))
+            pixels = b"".join(row_byte_strings)
+
+            buffer.set(rect, babl_format, pixels)
+
             idx += 1
-            rgn[0:width, 0:height] = pixels.tostring()
-            newlayer.flush()
-            newlayer.merge_shadow(True)
             newlayer.update(0, 0, width, height)
         else:
             break
@@ -215,402 +485,194 @@ def createLayers(image, maskFileNoExt, userSelColor, formatBinary):
 
 
 def cleanup(filepathPrefix):
-    for f in glob.glob(filepathPrefix + '*'):
+    for f in glob.glob(filepathPrefix + "*"):
         os.remove(f)
 
 
-def getPathDict(image):
-    paths = image.vectors
-    return {path.name: path for path in paths}
-
-
-def getBoxCos(image, boxPathDict, pathName):
-    path = boxPathDict.get(pathName)
-    if path is None:
-        logging.error('Error: Please create a box path and select it')
-        return None
-
-    points = path.strokes[0].points[0]
-    ptsCnt = len(points)
-
-    if ptsCnt != 24:
-        logging.error('Error: Path is not a box! ' + str(ptsCnt))
-        return None
-    else:
-        topLeft = [points[2], points[3]]
-        bottomRight = [points[14], points[15]]
-        return topLeft + bottomRight
-
-
-class DialogValue:
-    def __init__(self, filepath):
-        data = None
-        self.pythonPath = None
-        self.modelType = 'vit_h'
-        self.checkPtPath = None
-        self.maskType = 'Multiple'
-        self.segType = 'Auto'
-        self.isRandomColor = False
-        self.maskColor = [255, 0, 0, 255]
-        self.selPtCnt = 10
-        self.selBoxPathName = None
-
-        try:
-            with open(filepath, 'r') as f:
-                data = json.load(f)
-                self.pythonPath = data.get('pythonPath', self.pythonPath)
-                self.modelType = data.get('modelType', self.modelType)
-                self.checkPtPath = data.get('checkPtPath', self.checkPtPath)
-                self.maskType = data.get('maskType', self.maskType)
-                self.segType = data.get('segType', self.segType)
-                self.isRandomColor = data.get('isRandomColor', self.isRandomColor)
-                self.maskColor = data.get('maskColor', self.maskColor)
-                self.selPtCnt = data.get('selPtCnt', self.selPtCnt)
-        except Exception as e:
-            logging.info('Error reading json : %s' % e)
-
-    def persist(self, filepath):
-        data = {
-            'pythonPath': self.pythonPath,
-            'modelType': self.modelType,
-            'checkPtPath': self.checkPtPath,
-            'maskType': self.maskType,
-            'segType': self.segType,
-            'isRandomColor': self.isRandomColor,
-            'maskColor': self.maskColor,
-            'selPtCnt': self.selPtCnt,
-        }
-        with open(filepath, 'w') as f:
-            json.dump(data, f)
-
-
 def showError(message):
-    dialog = gtk.MessageDialog(
+    dialog = Gtk.MessageDialog(
         None,
-        gtk.DIALOG_MODAL | gtk.DIALOG_DESTROY_WITH_PARENT,
-        gtk.MESSAGE_ERROR,
-        gtk.BUTTONS_OK,
-        message
+        Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+        Gtk.MessageType.ERROR,
+        Gtk.ButtonsType.OK,
+        message,
     )
 
     dialog.run()
     dialog.destroy()
 
 
-# Define a function to restrict input to integers
-def kepPressNum(widget, event):
-    allowedKeys = set([gtk.keysyms.Home, gtk.keysyms.End, gtk.keysyms.Left,
-                       gtk.keysyms.Right, gtk.keysyms.Delete,
-                       gtk.keysyms.BackSpace])
-    keyval = event.keyval
-    # Check if the key is not a digit (0-9) and backspace and delete
-    if (keyval < 48 or keyval > 57) and keyval not in allowedKeys:
-        return True  # Ignore the keypress
-    return False  # Allow the keypress
-
-
-def onRandomToggled(checkbox, controlsToHide):
-    checked = checkbox.get_active()
-    for i, control in enumerate(controlsToHide):
-        control.set_property('visible', not checked)
-
-
-def onSegTypeChanged(dropdown, segTypeVals, controlsToHide, maskTypeControls):
-    segType = segTypeVals[dropdown.get_active()]
-    hideIdxs = []
-    if segType == 'Selection':  # Hide Path Names dropdown
-        hideIdxs = [1]
-    elif segType in {'Auto', 'Box'}:  # Hide Sel Count and Path Names dropdown
-        hideIdxs = [0, 1]
-
-    for i in range(len(controlsToHide)):
-        for control in controlsToHide[i]:
-            if control is not None:
-                control.set_property('visible', not (i in hideIdxs))
-    for control in maskTypeControls:
-        control.set_property('visible', segType != 'Auto')
-
-
-def getRightAlignLabel(labelStr):
-    label = gtk.Label(labelStr)
-    alignment = gtk.Alignment(xalign=1, yalign=0.5, xscale=0, yscale=0)
-    alignment.add(label)
-    return alignment
-
-
 def validateOptions(image, values):
-    if values.segType in {'Selection', 'Box-Selection', 'Box'}:
-        isSelEmpty = pdb.gimp_selection_is_empty(image)
-        if isSelEmpty == 1:
-            showError('No Selection! For the Segmentation Types: Box, ' +
-                      'Box-Selection and Selection to work you need ' +
-                      'to select an area on the image')
+    if values.segType in {"Selection", "Box"}:
+        procedure = Gimp.get_pdb().lookup_procedure("gimp-selection-is-empty")
+        config = procedure.create_config()
+        config.set_property("image", image)
+        result = procedure.run(config)
+        isSelEmpty = result.index(1)
+        if isSelEmpty:
+            showError(
+                "No Selection! For the Segmentation Types: "
+                + "Selection to work you need "
+                + "to select an area on the image"
+            )
             return False
     return True
 
 
-def optionsDialog(image, boxPathDict):
-    boxPathNames = sorted(boxPathDict.keys())
-    boxPathExist = len(boxPathNames) > 0
-    isGrayScale = image.base_type == GRAY
-    scriptDir = os.path.dirname(os.path.abspath(__file__))
-    configFilePath = os.path.join(scriptDir, 'segany_settings.json')
-
-    dialog = gtk.Dialog('Segment Anything', None, gtk.DIALOG_MODAL)
-    values = DialogValue(configFilePath)
-
-    pythonPath = values.pythonPath
-    logging.debug('pythonPath: %s' % pythonPath)
-    modelType = values.modelType
-    checkPtPath = values.checkPtPath
-    maskType = values.maskType
-    segType = values.segType
-    isRandomColor = values.isRandomColor
-    maskColor = values.maskColor
-    selPtCnt = values.selPtCnt
-
-    modelTypeVals = ['vit_h', 'vit_l', 'vit_b']
-    modelTypeIdx = modelTypeVals.index(modelType)
-
-    segTypeVals = ['Auto', 'Box', 'Selection', 'Box-Selection']
-    segTypeIdx = segTypeVals.index(segType)
-
-    maskTypeVals = ['Multiple', 'Single']
-    maskTypeIdx = maskTypeVals.index(maskType)
-
-    pythonFileLbl = getRightAlignLabel('Python3 Path:')
-    pythonFileBtn = gtk.FileChooserButton('Select File')
-    if pythonPath is not None:
-        pythonFileBtn.set_filename(pythonPath)
-
-    modelTypeLbl = getRightAlignLabel('Checkpoint Type:')
-    modelTypeDropDown = gtk.combo_box_new_text()
-    for value in modelTypeVals:
-        modelTypeDropDown.append_text(value)
-    modelTypeDropDown.set_active(modelTypeIdx)
-
-    checkPtFileLbl = getRightAlignLabel('Checkpoint Path:')
-    checkPtFileBtn = gtk.FileChooserButton('Select File')
-    if checkPtPath is not None:
-        checkPtFileBtn.set_filename(checkPtPath)
-
-    maskTypeLbl = getRightAlignLabel('Mask Type:')
-    maskTypeDropDown = gtk.combo_box_new_text()
-    for value in maskTypeVals:
-        maskTypeDropDown.append_text(value)
-    maskTypeDropDown.set_active(maskTypeIdx)
-
-    segTypeLbl = getRightAlignLabel('Segmentation Type:')
-    segTypeDropDown = gtk.combo_box_new_text()
-    for value in segTypeVals:
-        segTypeDropDown.append_text(value)
-    segTypeDropDown.set_active(segTypeIdx)
-
-    if not isGrayScale:
-        maskColorLbl = getRightAlignLabel('Mask Color:')
-        colHexVal = '#' + ''.join([('%x' % c).zfill(2) for c in maskColor[:3]])
-        gtkColor = gtk.gdk.color_parse(colHexVal)
-        maskColorBtn = gtk.ColorButton(gtkColor)  # Default color: Red
-
-        randColBtn = gtk.CheckButton('Random Mask Color')
-        randColBtn.set_active(isRandomColor)
-        randColBtn.connect('toggled', onRandomToggled,
-                           [maskColorLbl, maskColorBtn])
-
-    selPtsLbl = getRightAlignLabel('Selection Points:')
-    selPtsEntry = gtk.Entry()
-    selPtsEntry.connect('key-press-event', kepPressNum)
-    selPtsEntry.set_text(str(selPtCnt))  # Set a default value
-
-    boxPathNameLbl, boxPathNameDropDown = None, None
-    if boxPathExist:
-        boxPathNameLbl = getRightAlignLabel('Box Path:')
-        boxPathNameDropDown = gtk.combo_box_new_text()
-        for value in boxPathNames:
-            boxPathNameDropDown.append_text(value)
-        boxPathNameDropDown.set_active(0)
-
-    table = gtk.Table(0, 0, False)
-
-    segTypeDropDown.connect('changed', onSegTypeChanged,
-                            segTypeVals, [[selPtsLbl, selPtsEntry],
-                                          [boxPathNameLbl,
-                                           boxPathNameDropDown]],
-                                         [maskTypeLbl, maskTypeDropDown])
-
-    rowIdx = 0
-
-    table.attach(pythonFileLbl, 0, 1, rowIdx, rowIdx + 1)
-    table.attach(pythonFileBtn, 1, 2, rowIdx, rowIdx + 1)
-    rowIdx += 1
-
-    table.attach(modelTypeLbl, 0, 1, rowIdx, rowIdx + 1)
-    table.attach(modelTypeDropDown, 1, 2, rowIdx, rowIdx + 1)
-    rowIdx += 1
-
-    table.attach(checkPtFileLbl, 0, 1, rowIdx, rowIdx + 1)
-    table.attach(checkPtFileBtn, 1, 2, rowIdx, rowIdx + 1)
-    rowIdx += 1
-
-    table.attach(segTypeLbl, 0, 1, rowIdx, rowIdx + 1)
-    table.attach(segTypeDropDown, 1, 2, rowIdx, rowIdx + 1)
-    rowIdx += 1
-
-    table.attach(maskTypeLbl, 0, 1, rowIdx, rowIdx + 1)
-    table.attach(maskTypeDropDown, 1, 2, rowIdx, rowIdx + 1)
-    rowIdx += 1
-
-    table.attach(selPtsLbl, 0, 1, rowIdx, rowIdx + 1)
-    table.attach(selPtsEntry, 1, 2, rowIdx, rowIdx + 1)
-    rowIdx += 1
-
-    if boxPathExist:
-        table.attach(boxPathNameLbl, 0, 1, rowIdx, rowIdx + 1)
-        table.attach(boxPathNameDropDown, 1, 2, rowIdx, rowIdx + 1)
-        rowIdx += 1
-
-    if not isGrayScale:
-        table.attach(randColBtn, 1, 2, rowIdx, rowIdx + 1)
-        rowIdx += 1
-
-        table.attach(maskColorLbl, 0, 1, rowIdx, rowIdx + 1)
-        table.attach(maskColorBtn, 1, 2, rowIdx, rowIdx + 1)
-        rowIdx += 1
-
-        onRandomToggled(randColBtn, [maskColorLbl, maskColorBtn])
-
-    hbox = gtk.HBox()
-    hbox.pack_start(table, False, False, 0)
-
-    dialog.add_button(gtk.STOCK_OK, gtk.RESPONSE_OK)
-    dialog.add_button(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL)
-
-    dialog.vbox.pack_start(hbox, True, True, 0)
-
-    dialog.show_all()
-
-    onSegTypeChanged(segTypeDropDown, segTypeVals,
-                     [[selPtsLbl, selPtsEntry],
-                      [boxPathNameLbl, boxPathNameDropDown]],
-                     [maskTypeLbl, maskTypeDropDown])
-
-    while True:
-        response = dialog.run()
-
-        if response == gtk.RESPONSE_OK:
-            values.pythonPath = pythonFileBtn.get_filename()
-            values.modelType = modelTypeVals[modelTypeDropDown.get_active()]
-            values.checkPtPath = checkPtFileBtn.get_filename()
-            values.segType = segTypeVals[segTypeDropDown.get_active()]
-            values.maskType = maskTypeVals[maskTypeDropDown.get_active()]
-            if not isGrayScale:
-                values.isRandomColor = randColBtn.get_active()
-                maskColor = maskColorBtn.get_color()
-                values.maskColor = [255 * maskColor.red / 65535,
-                                    255 * maskColor.green / 65535,
-                                    255 * maskColor.blue / 65535, 255]
-            values.selPtCnt = int(selPtsEntry.get_text())
-            if boxPathExist:
-                values.selBoxPathName = \
-                    boxPathNames[boxPathNameDropDown.get_active()]
-
-            valid = validateOptions(image, values)
-            if not valid:
-                continue
-            values.persist(configFilePath)
-        else:
-            values = None
-        break
-
-    dialog.destroy()
-    return values
+def configLogging(level):
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
 
-def plugin_main(image, layer):
-    level = logging.DEBUG  # logging.WARN
-    configLogging(level)
-
-    boxPathDict = getPathDict(image)
-    values = optionsDialog(image, boxPathDict)
-    if values is None:  # Cancelled
+def run_segmentation(image, values):
+    configLogging(logging.DEBUG)
+    if not validateOptions(image, values):
         return
 
+    boxPathDict = getPathDict(image)
+
     if values.checkPtPath is None:
-        logging.error('Please set the Segment Anything checkpoint path.')
+        logging.error("Please set the Segment Anything checkpoint path.")
         return
 
     if values.pythonPath is None:
-        logging.warn('Warning: python path is None trying '
-                     'default python executable')
-        pythonPath = 'python'
+        logging.warn("Warning: python path is None trying default python executable")
+        pythonPath = "python"
     else:
         pythonPath = values.pythonPath
 
     formatBinary = True
-    filePrefix = '__seg__'
+    filePrefix = "__seg__"
     filepathPrefix = os.path.join(tempfile.gettempdir(), filePrefix)
-    selFile = filepathPrefix + 'sel__.txt'
-    maskFileNoExt = filepathPrefix + 'mask__'
+    selFile = filepathPrefix + "sel__.txt"
+    maskFileNoExt = filepathPrefix + "mask__"
 
-    segAnyScriptName = 'seganybridge.py'
+    segAnyScriptName = "seganybridge.py"
 
     cleanup(filepathPrefix)
 
     currDir = os.path.dirname(os.path.realpath(__file__))
     scriptFilepath = os.path.join(currDir, segAnyScriptName)
 
-    ipFilePath = filepathPrefix + next(tempfile._get_candidate_names()) \
-        + '.png'
+    ipFilePath = filepathPrefix + next(tempfile._get_candidate_names()) + ".png"
 
-    cmd = [pythonPath, scriptFilepath, values.modelType, values.checkPtPath,
-           ipFilePath, values.segType, values.maskType, maskFileNoExt,
-           str(formatBinary)]
+    cmd = [
+        pythonPath,
+        scriptFilepath,
+        values.modelType,
+        values.checkPtPath,
+        ipFilePath,
+        values.segType,
+        values.maskType,
+        maskFileNoExt,
+        str(formatBinary),
+    ]
 
-    newImage = pdb.gimp_image_duplicate(image)
-    visLayer = pdb.gimp_image_merge_visible_layers(newImage, CLIP_TO_IMAGE)
-    pdb.gimp_file_save(newImage, visLayer, ipFilePath, '?')
-    pdb.gimp_image_delete(newImage)
+    if values.segType == "Auto":
+        cmd.extend([values.segRes, str(values.cropNLayers), str(values.minMaskArea)])
 
-    channel = pdb.gimp_selection_save(image)
+    newImage = image.duplicate()
+    visLayer = newImage.merge_visible_layers(Gimp.MergeType.CLIP_TO_IMAGE)
 
-    if values.segType in {'Selection', 'Box-Selection'}:
+    procedure = Gimp.get_pdb().lookup_procedure("file-png-export")
+    config = procedure.create_config()
+    config.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
+    config.set_property("image", newImage)
+
+    gfile = Gio.File.new_for_path(ipFilePath)
+    config.set_property("file", gfile)
+    config.set_property("interlaced", False)
+    config.set_property("compression", 9)
+    config.set_property("bkgd", False)
+    config.set_property("offs", False)
+    config.set_property("phys", False)
+    config.set_property("time", False)
+    config.set_property("save-transparent", True)
+    config.set_property("optimize-palette", False)
+
+    config.set_property("include-exif", False)
+    config.set_property("include-iptc", False)
+    config.set_property("include-xmp", False)
+    config.set_property("include-color-profile", False)
+    config.set_property("include-thumbnail", False)
+    config.set_property("include-comment", False)
+    procedure.run(config)
+
+    newImage.delete()
+
+    procedure = Gimp.get_pdb().lookup_procedure("gimp-selection-save")
+    config = procedure.create_config()
+    config.set_property("image", image)
+    result = procedure.run(config)
+    channel = result.index(1)
+
+    if values.segType in {"Selection"}:
         exportSelection(image, selFile, values.selPtCnt)
         cmd.append(selFile)
-        if values.segType == 'Box-Selection':
-            boxCos = getBoxCos(image, boxPathDict, values.selBoxPathName)
-            if boxCos is None:
-                return
-            cmd.append(','.join(str(co) for co in boxCos))
-    elif values.segType == 'Box':
-        exists, x1, y1, x2, y2 = pdb.gimp_selection_bounds(image)
-        cmd.append('sel_place_holder')
-        cmd.append(','.join(str(co) for co in [x1, y1, x2, y2]))
+    elif values.segType == "Box":
+        procedure = Gimp.get_pdb().lookup_procedure("gimp-selection-bounds")
+        config = procedure.create_config()
+        config.set_property("image", image)
+        result = procedure.run(config)
+        x1 = result.index(2)
+        y1 = result.index(3)
+        x2 = result.index(4)
+        y2 = result.index(5)
+        cmd.append("sel_place_holder")
+        cmd.append(",".join(str(co) for co in [x1, y1, x2, y2]))
 
-    pdb.gimp_selection_none(image)
+    procedure = Gimp.get_pdb().lookup_procedure("gimp-selection-none")
+    config = procedure.create_config()
+    config.set_property("image", image)
+    procedure.run(config)
     shellRun(cmd)
 
     layerMaskColor = None if values.isRandomColor else values.maskColor
-    createLayers(image, maskFileNoExt, layerMaskColor, formatBinary)
+    createLayers(image, maskFileNoExt, layerMaskColor, formatBinary, values)
     cleanup(filepathPrefix)
 
     if channel is not None:
-        pdb.gimp_image_select_item(image, 2, channel)
+        procedure = Gimp.get_pdb().lookup_procedure("gimp-image-select-item")
+        config = procedure.create_config()
+        config.set_property("image", image)
+        config.set_property("operation", Gimp.ChannelOps.REPLACE)
+        config.set_property("item", channel)
+        procedure.run(config)
 
-    logging.debug('Finished creating segments!')
-
-
-register(
-        "python_fu_seg_any",
-        "Segment Anything Mask Layers",
-        "Create Layers With Masks Generated By Segment Anything",
-        "Shrinivas Kulkarni",
-        "Shrinivas Kulkarni",
-        "2023",
-        "<Image>/Image/Segment Anything Layers...",
-        "RGB*, GRAY*",
-        [],
-        [],
-        plugin_main)
+    logging.debug("Finished creating segments!")
 
 
-main()
+class SegAnyPlugin(Gimp.PlugIn):
+    def do_query_procedures(self):
+        return ["seg-any-gimp3"]
+
+    def do_create_procedure(self, name):
+        procedure = Gimp.ImageProcedure.new(
+            self, name, Gimp.PDBProcType.PLUGIN, self.seg_any_run, None
+        )
+        procedure.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
+        procedure.set_menu_label("Segment Anything Layers")
+        procedure.set_attribution("Shrinivas Kulkarni", "Shrinivas Kulkarni", "2024")
+        procedure.add_menu_path("<Image>/Image")
+        return procedure
+
+    def seg_any_run(self, procedure, run_mode, image, drawables, config, data):
+        boxPathDict = getPathDict(image)
+        dialog = OptionsDialog(image, boxPathDict)
+        response = dialog.run()
+
+        if response == Gtk.ResponseType.OK:
+            values = dialog.get_values()
+            image.undo_group_start()
+            run_segmentation(image, values)
+            image.undo_group_end()
+
+        dialog.destroy()
+
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+Gimp.main(SegAnyPlugin.__gtype__, sys.argv)

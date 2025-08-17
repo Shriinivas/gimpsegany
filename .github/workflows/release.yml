@@ -1,0 +1,35 @@
+name: Create Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Create GIMP 3 Plugin Zip
+        run: zip gimp-segany-gimp3.zip seganyplugin.py seganybridge.py
+
+      - name: Create GIMP 2 Plugin Zip
+        run: zip gimp-segany-gimp2.zip seganyplugin_GIMP2.py seganybridge_SAM1.py
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: latest
+          name: Latest Development Build
+          body: |
+            This release contains the latest development builds of the GIMP plugins.
+          draft: false
+          prerelease: true
+          files: |
+            gimp-segany-gimp3.zip
+            gimp-segany-gimp2.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
