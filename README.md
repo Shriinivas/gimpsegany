@@ -13,7 +13,9 @@ Download the appropriate zip file and extract it in the GIMP plug-ins folder. Fo
 
 This GIMP plugin integrates with Meta's AI-based tool Segment Anything, which enables you to effortlessly isolate objects within raster images directly from GIMP.
 
-This plugin supports both GIMP 2 and GIMP 3, using Segment Anything 1 and 2 respectively.
+This project provides two plugins:
+- **GIMP 3 Plugin**: Supports both **Segment Anything 1 (SAM1)** and **Segment Anything 2 (SAM2)**.
+- **GIMP 2 Plugin**: Supports **Segment Anything 1 (SAM1)**.
 
 ---
 
@@ -31,56 +33,66 @@ You can find GIMP's user plugin location in the `Edit > Preferences` menu under 
 
 Make sure the plugin script (`seganyplugin.py` or `seganyplugin_GIMP2.py`) is executable.
 
-### Segment Anything 2 Installation (for GIMP 3 Plugin)
+### Segment Anything Backend Installation
+
+You need to install the backend for the Segment Anything model you want to use. The GIMP 3 plugin can use either SAM1 or SAM2, while the GIMP 2 plugin only uses SAM1.
+
+#### Segment Anything 2 (SAM2) Installation
 
 You will get the detailed installation instructions about installing Segment Anything 2 on your platform on Meta's github site: https://github.com/facebookresearch/segment-anything-2.
 
 **Prerequisites:**
-
 - Python 3.10 or higher
 - PyTorch 2.3.1 or higher
 
 **Installation Steps:**
-
 1. Clone the repository:
    ```bash
    git clone https://github.com/facebookresearch/segment-anything-2.git
    ```
-2. Navigate to the directory:
+2. Navigate to the directory and install the package:
    ```bash
-   cd segment-anything-2
+   cd segment-anything-2 && pip install -e .
    ```
-3. Install the package:
+3. Download a model checkpoint (e.g., Tiny, Small, Base Plus, Large).
+4. Ensure the `segment-anything-2` directory is in your `PYTHONPATH`.
+
+#### Segment Anything 1 (SAM1) Installation
+
+You will get the detailed installation instructions about installing Segment Anything on your platform on Meta's github site: https://github.com/facebookresearch/segment-anything.
+
+**Installation Steps:**
+1. Clone the repository:
    ```bash
-   pip install -e .
+   git clone https://github.com/facebookresearch/segment-anything.git
    ```
-4. Download a model checkpoint. There are several sizes available, such as Tiny, Small, Base Plus, and Large.
+2. Navigate to the directory and install the package:
+   ```bash
+   cd segment-anything && pip install -e .
+   ```
+3. Download a model checkpoint (e.g., `vit_h`, `vit_l`, `vit_b`).
+4. Ensure the `segment-anything` directory is in your `PYTHONPATH`.
 
-Also please ensure the `segment-anything-2` you created with `git clone` is in the PYTHONPATH. For example, if `segment-anything-2` folder is `/home/user/programs/segment-anything-2`, then your PYTHONPATH should have `/home/user/programs/segment-anything-2` included in it. You can change the .profile on linux or the corresponding file on Windows so that this is available everytime you open GIMP.
+### Bridge Test
 
-**Bridge Test (GIMP 3):**
-Perform a quick check to ensure your Segment Anything 2 installation is working properly. Open a console and change direcotry to your GIMP plugin folder. Execute the following command:
+Perform a quick check to ensure your Segment Anything installation is working properly. Open a console and change directory to your GIMP plugin folder.
 
+**For GIMP 3 Plugin (SAM2 model):**
 ```
 /path/to/python3/python ./seganybridge.py sam2_hiera_large /path/to/checkpoint/model/sam2_hiera_large.pth
 ```
 
-"Success!!" message in the console after running the command indicates successful installation of Segment Anything 2. Any exceptions you encounter may be resolved by referring to the Segment Anything 2 site.
-
-### Segment Anything 1 Installation (for GIMP 2 Plugin)
-
-You will get the detailed installation instructions about installing Segment Anything on your platform on Meta's github site: https://github.com/facebookresearch/segment-anything. There are three models or checkpoints that are published with the tool, make sure you download at least one of them (the recommended one is vit_h).
-
-Also please ensure the `segment-anything` you created with `git clone` is in the PYTHONPATH. For example, if `segment-anything` folder is `/home/user/programs/segment-anything`, then your PYTHONPATH should have `/home/user/programs/segment-anything` included in it. You can change the .profile on linux or the corresponding file on Windows so that this is available everytime you open GIMP.
-
-**Bridge Test (GIMP 2):**
-Perform a quick check to ensure your Segment Anything installation is working properly. Open a console and change direcotry to your GIMP plugin folder. Execute the following command:
-
+**For GIMP 3 Plugin (SAM1 model):**
 ```
-/path/to/python3/python ./seganybridge_SAM1.py vit_h /path/to/checkpoint/model/sam_vit_h_4b8939.pth
+/path/to/python3/python ./seganybridge.py vit_h /path/to/checkpoint/model/sam_vit_h_4b8939.pth
 ```
 
-"Success!" message in the console after running the command indicates successful installation of Segment Anything. Any exceptions you encounter may be resolved by referring to the Segment Anything site.
+**For GIMP 2 Plugin (SAM1 model):**
+```
+/path/to/python3/python ./seganybridge_GIMP2_SAM1.py vit_h /path/to/checkpoint/model/sam_vit_h_4b8939.pth
+```
+
+A "Success!!" or "Success!" message indicates a successful installation.
 
 ---
 
@@ -96,19 +108,20 @@ Perform a quick check to ensure your Segment Anything installation is working pr
 ### Options
 
 - **Python3 Path:** The path to the python3 instance used while running the seganybridge script.
-- **Checkpoint Type / SAM2 Model Type:** The type of the Segment Anything model to use.
-- **Checkpoint Path:** The path to the downloaded Segment Anything model checkpoint file.
+- **Model Type:** The type of the Segment Anything model to use. Can be set to `Auto` to infer from the checkpoint filename (`sam_` prefix for SAM1, `sam2` for SAM2).
+- **Checkpoint Path:** The path to the downloaded Segment Anything model checkpoint file (`.pth` or `.safetensors`).
 - **Segmentation Type:** The method to be used for segmentation.
-  - **Auto (GIMP 2 & 3):** Automatically segments the entire image.
-  - **Box (GIMP 2 & 3):** Segments objects within a user-drawn rectangular selection.
-  - **Selection (GIMP 2 & 3):** Segments objects based on sample points from a user-drawn selection.
-  - **Box-Selection (GIMP 2 only):** A two-step process combining a box and selection points.
+  - **Auto:** Automatically segments the entire image.
+  - **Box:** Segments objects within a user-drawn rectangular selection.
+  - **Selection:** Segments objects based on sample points from a user-drawn selection.
 - **Mask Type:**
   - **Multiple:** Creates a separate layer for each potential object.
   - **Single:** Creates a single layer with the mask that has the highest AI probability.
 - **Random Mask Color:** If checked, the generated layers will have random colors. Otherwise, a specific color can be chosen.
 
-#### GIMP 3 Specific Options (for "Auto" Segmentation)
+#### SAM2 Specific Options (for "Auto" Segmentation)
+
+These options are only available for the GIMP 3 plugin when using a SAM2 model with "Auto" segmentation.
 
 - **Segmentation Resolution:** Controls the density of the segmentation grid. Higher values will generate more masks but will be slower. (Options: Low, Medium, High)
 - **Crop n Layers:** Enables segmentation on smaller, overlapping crops of the image, which can improve accuracy for smaller objects.

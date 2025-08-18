@@ -37,7 +37,7 @@ class DialogValue:
     def __init__(self, filepath):
         data = None
         self.pythonPath = None
-        self.modelType = "sam2_hiera_large"
+        self.modelType = "Auto"
         self.checkPtPath = None
         self.maskType = "Multiple"
         self.segType = "Auto"
@@ -87,7 +87,7 @@ class DialogValue:
 class OptionsDialog(Gtk.Dialog):
     def __init__(self, image, boxPathDict):
         Gtk.Dialog.__init__(
-            self, title="Segment Anything 2", transient_for=None, flags=0
+            self, title="Segment Anything", transient_for=None, flags=0
         )
         self.add_buttons(
             Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK
@@ -97,7 +97,7 @@ class OptionsDialog(Gtk.Dialog):
 
         self.boxPathNames = sorted(boxPathDict.keys())
         boxPathExist = len(self.boxPathNames) > 0
-        isGrayScale = image.get_base_type() == Gimp.ImageType.GRAYA_IMAGE
+        self.isGrayScale = image.get_base_type() == Gimp.ImageType.GRAYA_IMAGE
         scriptDir = os.path.dirname(os.path.abspath(__file__))
         self.configFilePath = os.path.join(scriptDir, "segany_settings.json")
 
@@ -120,28 +120,36 @@ class OptionsDialog(Gtk.Dialog):
         grid.attach(pythonFileLbl, 0, 0, 1, 1)
         grid.attach(self.pythonFileBtn, 1, 0, 1, 1)
 
-        # Checkpoint Type
-        modelTypeLbl = Gtk.Label(label="SAM2 Model Type:", xalign=1)
+        # Model Type
+        modelTypeLbl = Gtk.Label(label="Model Type:", xalign=1)
         self.modelTypeDropDown = Gtk.ComboBoxText()
         self.modelTypeVals = [
-            "sam2_hiera_large",
-            "sam2_hiera_base_plus",
-            "sam2_hiera_small",
-            "sam2_hiera_tiny",
+            "Auto",
+            "vit_h (SAM1)",
+            "vit_l (SAM1)",
+            "vit_b (SAM1)",
+            "sam2_hiera_large (SAM2)",
+            "sam2_hiera_base_plus (SAM2)",
+            "sam2_hiera_small (SAM2)",
+            "sam2_hiera_tiny (SAM2)",
         ]
         for value in self.modelTypeVals:
             self.modelTypeDropDown.append_text(value)
-        self.modelTypeDropDown.set_active(
-            self.modelTypeVals.index(self.values.modelType)
-        )
+        
+        try:
+            active_index = self.modelTypeVals.index(self.values.modelType)
+        except ValueError:
+            active_index = 0 # Default to Auto
+        self.modelTypeDropDown.set_active(active_index)
+
         grid.attach(modelTypeLbl, 0, 1, 1, 1)
         grid.attach(self.modelTypeDropDown, 1, 1, 1, 1)
 
         # Checkpoint Path
         checkPtFileLbl = Gtk.Label(
-            label="SAM2 Checkpoint (.pt/.safetensors):", xalign=1
+            label="Model Checkpoint (.pth/.safetensors):", xalign=1
         )
-        self.checkPtFileBtn = Gtk.FileChooserButton(title="Select SAM2 Checkpoint Path")
+        self.checkPtFileBtn = Gtk.FileChooserButton(title="Select Model Checkpoint Path")
         if self.values.checkPtPath is not None:
             self.checkPtFileBtn.set_filename(self.values.checkPtPath)
         grid.attach(checkPtFileLbl, 0, 2, 1, 1)
@@ -174,9 +182,7 @@ class OptionsDialog(Gtk.Dialog):
         grid.attach(self.selPtsLbl, 0, 5, 1, 1)
         grid.attach(self.selPtsEntry, 1, 5, 1, 1)
 
-        # ... (previous UI elements)
-
-        # Segmentation Resolution
+        # SAM2 Specific Auto-Segmentation Options
         self.segResLbl = Gtk.Label(label="Segmentation Resolution:", xalign=1)
         self.segResDropDown = Gtk.ComboBoxText()
         self.segResVals = ["Low", "Medium", "High"]
@@ -186,14 +192,12 @@ class OptionsDialog(Gtk.Dialog):
         grid.attach(self.segResLbl, 0, 6, 1, 1)
         grid.attach(self.segResDropDown, 1, 6, 1, 1)
 
-        # Crop n Layers
         self.cropNLayersLbl = Gtk.Label(label="Crop n Layers:", xalign=1)
         self.cropNLayersChk = Gtk.CheckButton()
         self.cropNLayersChk.set_active(self.values.cropNLayers > 0)
         grid.attach(self.cropNLayersLbl, 0, 7, 1, 1)
         grid.attach(self.cropNLayersChk, 1, 7, 1, 1)
 
-        # Minimum Mask Area
         self.minMaskAreaLbl = Gtk.Label(label="Minimum Mask Area:", xalign=1)
         self.minMaskAreaEntry = Gtk.Entry()
         self.minMaskAreaEntry.set_text(str(self.values.minMaskArea))
@@ -201,7 +205,7 @@ class OptionsDialog(Gtk.Dialog):
         grid.attach(self.minMaskAreaEntry, 1, 8, 1, 1)
 
         # Mask Color
-        if not isGrayScale:
+        if not self.isGrayScale:
             self.randColBtn = Gtk.CheckButton(label="Random Mask Color")
             self.randColBtn.set_active(self.values.isRandomColor)
             grid.attach(self.randColBtn, 1, 9, 1, 1)
@@ -216,38 +220,59 @@ class OptionsDialog(Gtk.Dialog):
             grid.attach(self.maskColorLbl, 0, 10, 1, 1)
             grid.attach(self.maskColorBtn, 1, 10, 1, 1)
 
-        self.segTypeDropDown.connect("changed", self.on_seg_type_changed)
-        if not isGrayScale:
+        self.connect("map-event", self.on_map_event)
+        self.segTypeDropDown.connect("changed", self.update_options_visibility)
+        self.modelTypeDropDown.connect("changed", self.update_options_visibility)
+        self.checkPtFileBtn.connect("file-set", self.update_options_visibility)
+        if not self.isGrayScale:
             self.randColBtn.connect("toggled", self.on_random_toggled)
-
-        self.on_seg_type_changed(self.segTypeDropDown)
-        if not isGrayScale:
-            self.on_random_toggled(self.randColBtn)
 
         self.show_all()
 
-    def on_seg_type_changed(self, widget):
+    def update_options_visibility(self, widget):
         segType = self.segTypeVals[self.segTypeDropDown.get_active()]
+        modelType = self.modelTypeVals[self.modelTypeDropDown.get_active()]
+
         isAuto = segType == "Auto"
+
+        # Determine if SAM1 is being used
+        checkpoint_path = self.checkPtFileBtn.get_filename()
+        isSam1_by_filename = (modelType == "Auto"
+                              and checkpoint_path
+                              and os.path.basename(checkpoint_path).lower().startswith("sam_"))
+        isSam1_by_type = "(SAM1)" in modelType
+        isSam1 = isSam1_by_filename or isSam1_by_type
+
         self.selPtsLbl.set_visible(segType in ["Selection"])
         self.selPtsEntry.set_visible(segType in ["Selection"])
-        self.maskTypeLbl.set_visible(segType not in ["Auto", "Box"])
-        self.maskTypeDropDown.set_visible(segType not in ["Auto", "Box"])
-        self.segResLbl.set_visible(isAuto)
-        self.segResDropDown.set_visible(isAuto)
-        self.cropNLayersLbl.set_visible(isAuto)
-        self.cropNLayersChk.set_visible(isAuto)
-        self.minMaskAreaLbl.set_visible(isAuto)
-        self.minMaskAreaEntry.set_visible(isAuto)
+        self.maskTypeLbl.set_visible(segType not in ["Auto"])
+        self.maskTypeDropDown.set_visible(segType not in ["Auto"])
+
+        # Show SAM2-specific options only for Auto mode and not SAM1
+        show_sam2_options = isAuto and not isSam1
+        self.segResLbl.set_visible(show_sam2_options)
+        self.segResDropDown.set_visible(show_sam2_options)
+        self.cropNLayersLbl.set_visible(show_sam2_options)
+        self.cropNLayersChk.set_visible(show_sam2_options)
+        self.minMaskAreaLbl.set_visible(show_sam2_options)
+        self.minMaskAreaEntry.set_visible(show_sam2_options)
 
     def on_random_toggled(self, widget):
         is_random = self.randColBtn.get_active()
         self.maskColorLbl.set_visible(not is_random)
         self.maskColorBtn.set_visible(not is_random)
 
+    def on_map_event(self, widget, event):
+        self.update_options_visibility(None)
+        if not self.isGrayScale:
+            self.on_random_toggled(self.randColBtn)
+
     def get_values(self):
         self.values.pythonPath = self.pythonFileBtn.get_filename()
+        
+        # Persist the full model type string for UI restoration
         self.values.modelType = self.modelTypeVals[self.modelTypeDropDown.get_active()]
+        
         self.values.checkPtPath = self.checkPtFileBtn.get_filename()
         self.values.segType = self.segTypeVals[self.segTypeDropDown.get_active()]
         self.values.maskType = self.maskTypeVals[self.maskTypeDropDown.get_active()]
@@ -264,10 +289,16 @@ class OptionsDialog(Gtk.Dialog):
         self.values.segRes = self.segResVals[self.segResDropDown.get_active()]
         self.values.cropNLayers = 1 if self.cropNLayersChk.get_active() else 0
         self.values.minMaskArea = int(self.minMaskAreaEntry.get_text())
-        # if self.boxPathNameDropDown:
-        #    self.values.selBoxPathName = self.boxPathNames[self.boxPathNameDropDown.get_active()]
         self.values.persist(self.configFilePath)
-        return self.values
+        
+        # Return a copy with the parsed model type for the bridge script
+        run_values = self.values
+        if run_values.modelType == "Auto":
+            run_values.modelType = "auto"
+        else:
+            run_values.modelType = run_values.modelType.split(' ')[0]
+            
+        return run_values
 
 
 def getPathDict(image):
@@ -572,7 +603,15 @@ def run_segmentation(image, values):
     ]
 
     if values.segType == "Auto":
-        cmd.extend([values.segRes, str(values.cropNLayers), str(values.minMaskArea)])
+        # Only add SAM2-specific args if the model is not SAM1
+        # The bridge script knows to ignore them, but this is cleaner.
+        isSam1_by_type = values.modelType in ["vit_h", "vit_l", "vit_b"]
+        isSam1_by_filename = (values.modelType == "auto"
+                              and values.checkPtPath
+                              and os.path.basename(values.checkPtPath).lower().startswith("sam_"))
+        isSam1 = isSam1_by_type or isSam1_by_filename
+        if not isSam1:
+             cmd.extend([values.segRes, str(values.cropNLayers), str(values.minMaskArea)])
 
     newImage = image.duplicate()
     visLayer = newImage.merge_visible_layers(Gimp.MergeType.CLIP_TO_IMAGE)
@@ -592,13 +631,6 @@ def run_segmentation(image, values):
     config.set_property("time", False)
     config.set_property("save-transparent", True)
     config.set_property("optimize-palette", False)
-
-    config.set_property("include-exif", False)
-    config.set_property("include-iptc", False)
-    config.set_property("include-xmp", False)
-    config.set_property("include-color-profile", False)
-    config.set_property("include-thumbnail", False)
-    config.set_property("include-comment", False)
     procedure.run(config)
 
     newImage.delete()
