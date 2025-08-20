@@ -41,10 +41,12 @@ You need to install the backend for the Segment Anything model you want to use. 
 You will get the detailed installation instructions about installing Segment Anything 2 on your platform on Meta's github site: https://github.com/facebookresearch/segment-anything-2.
 
 **Prerequisites:**
+
 - Python 3.10 or higher
 - PyTorch 2.3.1 or higher
 
 **Installation Steps:**
+
 1. Clone the repository:
    ```bash
    git clone https://github.com/facebookresearch/segment-anything-2.git
@@ -61,6 +63,7 @@ You will get the detailed installation instructions about installing Segment Any
 You will get the detailed installation instructions about installing Segment Anything on your platform on Meta's github site: https://github.com/facebookresearch/segment-anything.
 
 **Installation Steps:**
+
 1. Clone the repository:
    ```bash
    git clone https://github.com/facebookresearch/segment-anything.git
@@ -77,16 +80,18 @@ You will get the detailed installation instructions about installing Segment Any
 Perform a quick check to ensure your Segment Anything installation is working properly. Open a console and change directory to your GIMP plugin folder.
 
 **For SAM2 model:**
+
 ```
 /path/to/python3/python ./seganybridge.py sam2_hiera_large /path/to/checkpoint/model/sam2_hiera_large.pth
 ```
 
 **For SAM1 model:**
+
 ```
 /path/to/python3/python ./seganybridge.py vit_h /path/to/checkpoint/model/sam_vit_h_4b8939.pth
 ```
 
-A "Success!!" or "Success!" message indicates a successful installation.
+A "Success!!" message indicates a successful installation.
 
 ---
 
