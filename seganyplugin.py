@@ -86,9 +86,7 @@ class DialogValue:
 
 class OptionsDialog(Gtk.Dialog):
     def __init__(self, image, boxPathDict):
-        Gtk.Dialog.__init__(
-            self, title="Segment Anything", transient_for=None, flags=0
-        )
+        Gtk.Dialog.__init__(self, title="Segment Anything", transient_for=None, flags=0)
         self.add_buttons(
             Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK
         )
@@ -135,11 +133,11 @@ class OptionsDialog(Gtk.Dialog):
         ]
         for value in self.modelTypeVals:
             self.modelTypeDropDown.append_text(value)
-        
+
         try:
             active_index = self.modelTypeVals.index(self.values.modelType)
         except ValueError:
-            active_index = 0 # Default to Auto
+            active_index = 0  # Default to Auto
         self.modelTypeDropDown.set_active(active_index)
 
         grid.attach(modelTypeLbl, 0, 1, 1, 1)
@@ -149,7 +147,9 @@ class OptionsDialog(Gtk.Dialog):
         checkPtFileLbl = Gtk.Label(
             label="Model Checkpoint (.pth/.safetensors):", xalign=1
         )
-        self.checkPtFileBtn = Gtk.FileChooserButton(title="Select Model Checkpoint Path")
+        self.checkPtFileBtn = Gtk.FileChooserButton(
+            title="Select Model Checkpoint Path"
+        )
         if self.values.checkPtPath is not None:
             self.checkPtFileBtn.set_filename(self.values.checkPtPath)
         grid.attach(checkPtFileLbl, 0, 2, 1, 1)
@@ -237,9 +237,11 @@ class OptionsDialog(Gtk.Dialog):
 
         # Determine if SAM1 is being used
         checkpoint_path = self.checkPtFileBtn.get_filename()
-        isSam1_by_filename = (modelType == "Auto"
-                              and checkpoint_path
-                              and os.path.basename(checkpoint_path).lower().startswith("sam_"))
+        isSam1_by_filename = (
+            modelType == "Auto"
+            and checkpoint_path
+            and os.path.basename(checkpoint_path).lower().startswith("sam_")
+        )
         isSam1_by_type = "(SAM1)" in modelType
         isSam1 = isSam1_by_filename or isSam1_by_type
 
@@ -269,10 +271,10 @@ class OptionsDialog(Gtk.Dialog):
 
     def get_values(self):
         self.values.pythonPath = self.pythonFileBtn.get_filename()
-        
+
         # Persist the full model type string for UI restoration
         self.values.modelType = self.modelTypeVals[self.modelTypeDropDown.get_active()]
-        
+
         self.values.checkPtPath = self.checkPtFileBtn.get_filename()
         self.values.segType = self.segTypeVals[self.segTypeDropDown.get_active()]
         self.values.maskType = self.maskTypeVals[self.maskTypeDropDown.get_active()]
@@ -290,14 +292,14 @@ class OptionsDialog(Gtk.Dialog):
         self.values.cropNLayers = 1 if self.cropNLayersChk.get_active() else 0
         self.values.minMaskArea = int(self.minMaskAreaEntry.get_text())
         self.values.persist(self.configFilePath)
-        
+
         # Return a copy with the parsed model type for the bridge script
         run_values = self.values
         if run_values.modelType == "Auto":
             run_values.modelType = "auto"
         else:
-            run_values.modelType = run_values.modelType.split(' ')[0]
-            
+            run_values.modelType = run_values.modelType.split(" ")[0]
+
         return run_values
 
 
@@ -606,12 +608,16 @@ def run_segmentation(image, values):
         # Only add SAM2-specific args if the model is not SAM1
         # The bridge script knows to ignore them, but this is cleaner.
         isSam1_by_type = values.modelType in ["vit_h", "vit_l", "vit_b"]
-        isSam1_by_filename = (values.modelType == "auto"
-                              and values.checkPtPath
-                              and os.path.basename(values.checkPtPath).lower().startswith("sam_"))
+        isSam1_by_filename = (
+            values.modelType == "auto"
+            and values.checkPtPath
+            and os.path.basename(values.checkPtPath).lower().startswith("sam_")
+        )
         isSam1 = isSam1_by_type or isSam1_by_filename
         if not isSam1:
-             cmd.extend([values.segRes, str(values.cropNLayers), str(values.minMaskArea)])
+            cmd.extend(
+                [values.segRes, str(values.cropNLayers), str(values.minMaskArea)]
+            )
 
     newImage = image.duplicate()
     visLayer = newImage.merge_visible_layers(Gimp.MergeType.CLIP_TO_IMAGE)
@@ -681,6 +687,9 @@ class SegAnyPlugin(Gimp.PlugIn):
     def do_query_procedures(self):
         return ["seg-any-gimp3"]
 
+    def do_set_i18n(self, procname):
+        return False, None, None  # Returning False disables localization
+
     def do_create_procedure(self, name):
         procedure = Gimp.ImageProcedure.new(
             self, name, Gimp.PDBProcType.PLUGIN, self.seg_any_run, None
@@ -708,3 +717,4 @@ class SegAnyPlugin(Gimp.PlugIn):
 
 
 Gimp.main(SegAnyPlugin.__gtype__, sys.argv)
+
