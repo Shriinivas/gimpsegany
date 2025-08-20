@@ -481,10 +481,10 @@ def createLayers(image, maskFileNoExt, userSelColor, formatBinary, values):
                 100.0,
                 Gimp.LayerMode.NORMAL,
             )
+            buffer = newlayer.get_buffer()
             image.insert_layer(newlayer, parent, 0)
             newlayer.set_visible(False)
 
-            buffer = newlayer.get_buffer()
             rect = Gegl.Rectangle.new(0, 0, width, height)
 
             maskVals = readMaskFile(filepath, formatBinary)
@@ -513,6 +513,7 @@ def createLayers(image, maskFileNoExt, userSelColor, formatBinary, values):
             newlayer.update(0, 0, width, height)
         else:
             break
+    # Gimp.displays_flush()  # turn on only if needed
 
     return idx
 
@@ -717,4 +718,3 @@ class SegAnyPlugin(Gimp.PlugIn):
 
 
 Gimp.main(SegAnyPlugin.__gtype__, sys.argv)
-
