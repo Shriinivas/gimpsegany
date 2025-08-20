@@ -2,20 +2,17 @@
 
 ## Downloads
 
-You can download the latest version of the plugins from the [GitHub Releases page](https://github.com/Shriinivas/gimpsegany/releases/latest).
+You can download the latest version of the plugin from the [GitHub Releases page](https://github.com/Shriinivas/gimpsegany/releases/latest).
 
 - `gimp-segany-gimp3.zip`: For GIMP 3
-- `gimp-segany-gimp2.zip`: For GIMP 2
 
-Download the appropriate zip file and extract it in the GIMP plug-ins folder. For GIMP 3, you should extract the contents to `plug-ins/seganyplugin/`.
+Download the zip file and follow the installation instructions below.
 
 ---
 
 This GIMP plugin integrates with Meta's AI-based tool Segment Anything, which enables you to effortlessly isolate objects within raster images directly from GIMP.
 
-This project provides two plugins:
-- **GIMP 3 Plugin**: Supports both **Segment Anything 1 (SAM1)** and **Segment Anything 2 (SAM2)**.
-- **GIMP 2 Plugin**: Supports **Segment Anything 1 (SAM1)**.
+This project provides a plugin that supports both **Segment Anything 1 (SAM1)** and **Segment Anything 2 (SAM2)**.
 
 ---
 
@@ -23,19 +20,21 @@ This project provides two plugins:
 
 ### Plugin Installation
 
-Please refer to the [Downloads](#downloads) section for instructions on how to download and install the plugin.
+1.  Go to the [GitHub Releases page](https://github.com/Shriinivas/gimpsegany/releases/latest) and download `gimp-segany-gimp3.zip`.
+2.  Extract the zip file in your GIMP `plug-ins` folder. This will create a `seganyplugin` directory with the plugin files inside.
+3.  If you are updating, you can extract and replace the existing `seganyplugin` directory.
 
-You can find GIMP's user plugin location in the `Edit > Preferences` menu under the `Folders` section. For GIMP 3, you may need to create the `plug-ins` directory if it does not already exist. Here are the default locations for each operating system:
+You can find GIMP's user plugin location in the `Edit > Preferences` menu under the `Folders` section. Here are the default locations for each operating system:
 
 - **Windows:** `C:\Users\[YourUsername]\AppData\Roaming\GIMP\3.0\plug-ins\`
 - **Linux:** `~/.config/GIMP/3.0/plug-ins/`
 - **macOS:** `~/Library/Application Support/GIMP/3.0/plug-ins/`
 
-Make sure the plugin script (`seganyplugin.py` or `seganyplugin_GIMP2.py`) is executable.
+After extracting, ensure the plugin script is executable (on Linux and macOS).
 
 ### Segment Anything Backend Installation
 
-You need to install the backend for the Segment Anything model you want to use. The GIMP 3 plugin can use either SAM1 or SAM2, while the GIMP 2 plugin only uses SAM1.
+You need to install the backend for the Segment Anything model you want to use. The plugin can use either SAM1 or SAM2.
 
 #### Segment Anything 2 (SAM2) Installation
 
@@ -77,19 +76,14 @@ You will get the detailed installation instructions about installing Segment Any
 
 Perform a quick check to ensure your Segment Anything installation is working properly. Open a console and change directory to your GIMP plugin folder.
 
-**For GIMP 3 Plugin (SAM2 model):**
+**For SAM2 model:**
 ```
 /path/to/python3/python ./seganybridge.py sam2_hiera_large /path/to/checkpoint/model/sam2_hiera_large.pth
 ```
 
-**For GIMP 3 Plugin (SAM1 model):**
+**For SAM1 model:**
 ```
 /path/to/python3/python ./seganybridge.py vit_h /path/to/checkpoint/model/sam_vit_h_4b8939.pth
-```
-
-**For GIMP 2 Plugin (SAM1 model):**
-```
-/path/to/python3/python ./seganybridge_GIMP2_SAM1.py vit_h /path/to/checkpoint/model/sam_vit_h_4b8939.pth
 ```
 
 A "Success!!" or "Success!" message indicates a successful installation.
@@ -101,7 +95,7 @@ A "Success!!" or "Success!" message indicates a successful installation.
 - Open GIMP. Under the "Image" menu, you should see a new submenu called "Segment Anything Layers".
 - Open an image file and click on the plugin's menu item to bring up the dialog box.
 
-**Plugin UI (GIMP 3):**
+**Plugin UI:**
 
 [//]: # "Add a screenshot of the GIMP 3 plugin UI here"
 
@@ -121,7 +115,7 @@ A "Success!!" or "Success!" message indicates a successful installation.
 
 #### SAM2 Specific Options (for "Auto" Segmentation)
 
-These options are only available for the GIMP 3 plugin when using a SAM2 model with "Auto" segmentation.
+These options are only available when using a SAM2 model with "Auto" segmentation.
 
 - **Segmentation Resolution:** Controls the density of the segmentation grid. Higher values will generate more masks but will be slower. (Options: Low, Medium, High)
 - **Crop n Layers:** Enables segmentation on smaller, overlapping crops of the image, which can improve accuracy for smaller objects.

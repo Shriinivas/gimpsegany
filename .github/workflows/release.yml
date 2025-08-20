@@ -15,10 +15,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Create GIMP 3 Plugin Zip
-        run: zip gimp-segany-gimp3.zip seganyplugin.py seganybridge.py
+        run: |
+          mkdir seganyplugin
+          cp seganyplugin.py seganybridge.py seganyplugin/
+          zip -r gimp-segany-gimp3.zip seganyplugin
 
-      - name: Create GIMP 2 Plugin Zip
-        run: zip gimp-segany-gimp2.zip seganyplugin_GIMP2.py seganybridge_GIMP2_SAM1.py
+      # - name: Create GIMP 2 Plugin Zip
+      #   run: zip gimp-segany-gimp2.zip seganyplugin_GIMP2.py seganybridge_GIMP2_SAM1.py
 
       - name: Create Release
         id: create_release
@@ -31,6 +34,6 @@ jobs:
           prerelease: true
           files: |
             gimp-segany-gimp3.zip
-            gimp-segany-gimp2.zip
+            # gimp-segany-gimp2.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
