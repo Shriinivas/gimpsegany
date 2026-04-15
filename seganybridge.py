@@ -251,13 +251,23 @@ class SAM2Strategy(SegmentationStrategy):
             return False
 
     def load_model(self, checkPtFilePath, modelType):
-        model_configs = {
+        model_filename = os.path.basename(checkPtFilePath)
+        is_sam21 = model_filename.startswith("sam2.1")
+
+        model_configs_v2 = {
             "sam2_hiera_tiny": "sam2_hiera_t.yaml",
             "sam2_hiera_small": "sam2_hiera_s.yaml",
             "sam2_hiera_base_plus": "sam2_hiera_b+.yaml",
             "sam2_hiera_large": "sam2_hiera_l.yaml",
         }
-        config_file = model_configs.get(modelType, "sam2_hiera_l.yaml")
+        model_configs_v21 = {
+            "sam2_hiera_tiny": "configs/sam2.1/sam2.1_hiera_t.yaml",
+            "sam2_hiera_small": "configs/sam2.1/sam2.1_hiera_s.yaml",
+            "sam2_hiera_base_plus": "configs/sam2.1/sam2.1_hiera_b+.yaml",
+            "sam2_hiera_large": "configs/sam2.1/sam2.1_hiera_l.yaml",
+        }
+        configs = model_configs_v21 if is_sam21 else model_configs_v2
+        config_file = configs.get(modelType, "sam2_hiera_l.yaml")
         actual_checkpoint_path = checkPtFilePath
         if checkPtFilePath.endswith(".safetensors"):
             print("Converting safetensors to pth format...")
