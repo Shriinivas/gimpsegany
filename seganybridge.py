@@ -258,7 +258,8 @@ class SAM2Strategy(SegmentationStrategy):
                 print("Failed to convert safetensors file")
                 return None
         try:
-            sam = build_sam2(config_file, actual_checkpoint_path)
+            device = "mps" if torch.backends.mps.is_available() else "cpu"
+            sam = build_sam2(config_file, actual_checkpoint_path, device=device)
             print("SAM2 Model loaded successfully!")
             return sam
         except Exception as e:
@@ -367,7 +368,10 @@ def main():
     if sam is None:
         return
 
-    if torch.cuda.is_available():
+    if torch.backends.mps.is_available():
+        sam.to(device="mps")
+        print("Model moved to MPS (Apple Silicon)")
+    elif torch.cuda.is_available():
         sam.to(device="cuda")
         print("Model moved to CUDA")
 
