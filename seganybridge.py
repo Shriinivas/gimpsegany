@@ -33,12 +33,17 @@ from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 
-# SAM1 imports
-from segment_anything import (
-    sam_model_registry,
-    SamAutomaticMaskGenerator as SamAutomaticMaskGenerator_SAM1,
-    SamPredictor,
-)
+# SAM1 imports (optional – only needed when using SAM1 models)
+try:
+    from segment_anything import (
+        sam_model_registry,
+        SamAutomaticMaskGenerator as SamAutomaticMaskGenerator_SAM1,
+        SamPredictor,
+    )
+except ImportError:
+    sam_model_registry = None
+    SamAutomaticMaskGenerator_SAM1 = None
+    SamPredictor = None
 
 # --- Utility Functions ---
 
@@ -138,6 +143,12 @@ class SAM1Strategy(SegmentationStrategy):
             return None
 
     def load_model(self, checkPtFilePath, modelType):
+        if sam_model_registry is None:
+            print(
+                "Error: SAM1 is not installed. Install with: "
+                "pip install git+https://github.com/facebookresearch/segment-anything.git"
+            )
+            return None
         try:
             sam = sam_model_registry[modelType](checkpoint=checkPtFilePath)
             print("SAM1 Model loaded successfully!")
