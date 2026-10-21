@@ -19,6 +19,7 @@ from gi.repository import GLib
 
 import tempfile
 import subprocess
+import threading
 from os.path import exists
 from array import array
 import random
@@ -31,6 +32,42 @@ import logging
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk
+
+PLUGIN_VERSION = "1.0.0"  # Bump on every user-visible change.
+
+
+def isSam3CheckpointPath(checkpointPath):
+    """True if the path, or the folder holding it, is a transformers SAM3 model."""
+    if not checkpointPath:
+        return False
+    if os.path.basename(checkpointPath).lower().startswith("sam3"):
+        return True
+    modelDir = (
+        checkpointPath
+        if os.path.isdir(checkpointPath)
+        else os.path.dirname(os.path.abspath(checkpointPath))
+    )
+    configFile = os.path.join(modelDir, "config.json")
+    if not os.path.isfile(configFile):
+        return False
+    try:
+        with open(configFile, "r") as f:
+            config = json.load(f)
+    except Exception:
+        return False
+    description = str(config.get("model_type", "")) + str(
+        config.get("architectures", "")
+    )
+    return "sam3" in description.lower()
+
+
+def checkpointIsSam3(checkPtPath):
+    """True if the picked checkpoint resolves to the SAM3 backend."""
+    if not checkPtPath:
+        return False
+    return os.path.basename(checkPtPath).lower().startswith(
+        "sam3"
+    ) or isSam3CheckpointPath(checkPtPath)
 
 
 class DialogValue:
@@ -48,6 +85,7 @@ class DialogValue:
         self.segRes = "Medium"
         self.cropNLayers = 0
         self.minMaskArea = 0
+        self.textPrompt = ""
 
         try:
             with open(filepath, "r") as f:
@@ -63,6 +101,7 @@ class DialogValue:
                 self.segRes = data.get("segRes", self.segRes)
                 self.cropNLayers = data.get("cropNLayers", self.cropNLayers)
                 self.minMaskArea = data.get("minMaskArea", self.minMaskArea)
+                self.textPrompt = data.get("textPrompt", self.textPrompt)
         except Exception as e:
             logging.info("Error reading json : %s" % e)
 
@@ -79,6 +118,7 @@ class DialogValue:
             "segRes": self.segRes,
             "cropNLayers": self.cropNLayers,
             "minMaskArea": self.minMaskArea,
+            "textPrompt": self.textPrompt,
         }
         with open(filepath, "w") as f:
             json.dump(data, f)
@@ -90,6 +130,7 @@ class OptionsDialog(Gtk.Dialog):
         self.add_buttons(
             Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK
         )
+        self.okBtn = self.get_widget_for_response(Gtk.ResponseType.OK)
 
         self.set_default_size(400, 200)
 
@@ -118,42 +159,23 @@ class OptionsDialog(Gtk.Dialog):
         grid.attach(pythonFileLbl, 0, 0, 1, 1)
         grid.attach(self.pythonFileBtn, 1, 0, 1, 1)
 
-        # Model Type
-        modelTypeLbl = Gtk.Label(label="Model Type:", xalign=1)
-        self.modelTypeDropDown = Gtk.ComboBoxText()
-        self.modelTypeVals = [
-            "Auto",
-            "vit_h (SAM1)",
-            "vit_l (SAM1)",
-            "vit_b (SAM1)",
-            "sam2_hiera_large (SAM2)",
-            "sam2_hiera_base_plus (SAM2)",
-            "sam2_hiera_small (SAM2)",
-            "sam2_hiera_tiny (SAM2)",
-        ]
-        for value in self.modelTypeVals:
-            self.modelTypeDropDown.append_text(value)
-
-        try:
-            active_index = self.modelTypeVals.index(self.values.modelType)
-        except ValueError:
-            active_index = 0  # Default to Auto
-        self.modelTypeDropDown.set_active(active_index)
-
-        grid.attach(modelTypeLbl, 0, 1, 1, 1)
-        grid.attach(self.modelTypeDropDown, 1, 1, 1, 1)
-
-        # Checkpoint Path
+        # Checkpoint Path. The bridge detects the backend, version and size
+        # from this automatically; there is no model type to pick.
         checkPtFileLbl = Gtk.Label(
-            label="Model Checkpoint (.pth/.safetensors):", xalign=1
+            label="Model Checkpoint (.pth/.safetensors, SAM3 folder):", xalign=1
         )
         self.checkPtFileBtn = Gtk.FileChooserButton(
             title="Select Model Checkpoint Path"
         )
+        self.checkPtFileBtn.set_tooltip_text(
+            "The backend is detected automatically. For large photos SAM3 "
+            "runs at full resolution; SAM1/SAM2 Auto downscale images over "
+            "2048 px to fit GPU memory."
+        )
         if self.values.checkPtPath is not None:
             self.checkPtFileBtn.set_filename(self.values.checkPtPath)
-        grid.attach(checkPtFileLbl, 0, 2, 1, 1)
-        grid.attach(self.checkPtFileBtn, 1, 2, 1, 1)
+        grid.attach(checkPtFileLbl, 0, 1, 1, 1)
+        grid.attach(self.checkPtFileBtn, 1, 1, 1, 1)
 
         # Segmentation Type
         segTypeLbl = Gtk.Label(label="Segmentation Type:", xalign=1)
@@ -162,8 +184,8 @@ class OptionsDialog(Gtk.Dialog):
         for value in self.segTypeVals:
             self.segTypeDropDown.append_text(value)
         self.segTypeDropDown.set_active(self.segTypeVals.index(self.values.segType))
-        grid.attach(segTypeLbl, 0, 3, 1, 1)
-        grid.attach(self.segTypeDropDown, 1, 3, 1, 1)
+        grid.attach(segTypeLbl, 0, 2, 1, 1)
+        grid.attach(self.segTypeDropDown, 1, 2, 1, 1)
 
         # Mask Type
         self.maskTypeLbl = Gtk.Label(label="Mask Type:", xalign=1)
@@ -172,15 +194,15 @@ class OptionsDialog(Gtk.Dialog):
         for value in self.maskTypeVals:
             self.maskTypeDropDown.append_text(value)
         self.maskTypeDropDown.set_active(self.maskTypeVals.index(self.values.maskType))
-        grid.attach(self.maskTypeLbl, 0, 4, 1, 1)
-        grid.attach(self.maskTypeDropDown, 1, 4, 1, 1)
+        grid.attach(self.maskTypeLbl, 0, 3, 1, 1)
+        grid.attach(self.maskTypeDropDown, 1, 3, 1, 1)
 
         # Selection Points
         self.selPtsLbl = Gtk.Label(label="Selection Points:", xalign=1)
         self.selPtsEntry = Gtk.Entry()
         self.selPtsEntry.set_text(str(self.values.selPtCnt))
-        grid.attach(self.selPtsLbl, 0, 5, 1, 1)
-        grid.attach(self.selPtsEntry, 1, 5, 1, 1)
+        grid.attach(self.selPtsLbl, 0, 4, 1, 1)
+        grid.attach(self.selPtsEntry, 1, 4, 1, 1)
 
         # SAM2 Specific Auto-Segmentation Options
         self.segResLbl = Gtk.Label(label="Segmentation Resolution:", xalign=1)
@@ -189,26 +211,44 @@ class OptionsDialog(Gtk.Dialog):
         for value in self.segResVals:
             self.segResDropDown.append_text(value)
         self.segResDropDown.set_active(self.segResVals.index(self.values.segRes))
-        grid.attach(self.segResLbl, 0, 6, 1, 1)
-        grid.attach(self.segResDropDown, 1, 6, 1, 1)
+        grid.attach(self.segResLbl, 0, 5, 1, 1)
+        grid.attach(self.segResDropDown, 1, 5, 1, 1)
 
         self.cropNLayersLbl = Gtk.Label(label="Crop n Layers:", xalign=1)
         self.cropNLayersChk = Gtk.CheckButton()
         self.cropNLayersChk.set_active(self.values.cropNLayers > 0)
-        grid.attach(self.cropNLayersLbl, 0, 7, 1, 1)
-        grid.attach(self.cropNLayersChk, 1, 7, 1, 1)
+        grid.attach(self.cropNLayersLbl, 0, 6, 1, 1)
+        grid.attach(self.cropNLayersChk, 1, 6, 1, 1)
 
         self.minMaskAreaLbl = Gtk.Label(label="Minimum Mask Area:", xalign=1)
         self.minMaskAreaEntry = Gtk.Entry()
         self.minMaskAreaEntry.set_text(str(self.values.minMaskArea))
-        grid.attach(self.minMaskAreaLbl, 0, 8, 1, 1)
-        grid.attach(self.minMaskAreaEntry, 1, 8, 1, 1)
+        grid.attach(self.minMaskAreaLbl, 0, 7, 1, 1)
+        grid.attach(self.minMaskAreaEntry, 1, 7, 1, 1)
+
+        # Text Prompt (SAM3)
+        self.textPromptLbl = Gtk.Label(label="Text Prompt (SAM3):", xalign=1)
+        self.textPromptEntry = Gtk.Entry()
+        self.textPromptEntry.set_text(self.values.textPrompt)
+        self.textPromptEntry.set_tooltip_text(
+            "Required for Auto segmentation: SAM 3 only finds instances of the "
+            "concepts you name here (comma-separated noun phrases, e.g. "
+            "'person, chair'). Optional for Box and Selection, where it refines "
+            "the visual prompt."
+        )
+        grid.attach(self.textPromptLbl, 0, 10, 1, 1)
+        grid.attach(self.textPromptEntry, 1, 10, 1, 1)
+
+        # Version stamp (bottom right) so a glance confirms the installed build.
+        self.versionLbl = Gtk.Label(xalign=1)
+        self.versionLbl.set_markup(f"<small>v{PLUGIN_VERSION}</small>")
+        grid.attach(self.versionLbl, 0, 11, 2, 1)
 
         # Mask Color
         if not self.isGrayScale:
             self.randColBtn = Gtk.CheckButton(label="Random Mask Color")
             self.randColBtn.set_active(self.values.isRandomColor)
-            grid.attach(self.randColBtn, 1, 9, 1, 1)
+            grid.attach(self.randColBtn, 1, 8, 1, 1)
 
             self.maskColorLbl = Gtk.Label(label="Mask Color:", xalign=1)
             self.maskColorBtn = Gtk.ColorButton()
@@ -217,13 +257,13 @@ class OptionsDialog(Gtk.Dialog):
                 f"rgb({self.values.maskColor[0]},{self.values.maskColor[1]},{self.values.maskColor[2]})"
             )
             self.maskColorBtn.set_rgba(rgba)
-            grid.attach(self.maskColorLbl, 0, 10, 1, 1)
-            grid.attach(self.maskColorBtn, 1, 10, 1, 1)
+            grid.attach(self.maskColorLbl, 0, 9, 1, 1)
+            grid.attach(self.maskColorBtn, 1, 9, 1, 1)
 
         self.connect("map-event", self.on_map_event)
         self.segTypeDropDown.connect("changed", self.update_options_visibility)
-        self.modelTypeDropDown.connect("changed", self.update_options_visibility)
         self.checkPtFileBtn.connect("file-set", self.update_options_visibility)
+        self.textPromptEntry.connect("changed", self.update_options_visibility)
         if not self.isGrayScale:
             self.randColBtn.connect("toggled", self.on_random_toggled)
 
@@ -231,33 +271,45 @@ class OptionsDialog(Gtk.Dialog):
 
     def update_options_visibility(self, widget):
         segType = self.segTypeVals[self.segTypeDropDown.get_active()]
-        modelType = self.modelTypeVals[self.modelTypeDropDown.get_active()]
 
         isAuto = segType == "Auto"
 
-        # Determine if SAM1 is being used
+        # The bridge detects the backend at run time; the dialog only guesses
+        # the family from the picked path to show the right rows.
         checkpoint_path = self.checkPtFileBtn.get_filename()
-        isSam1_by_filename = (
-            modelType == "Auto"
-            and checkpoint_path
-            and os.path.basename(checkpoint_path).lower().startswith("sam_")
-        )
-        isSam1_by_type = "(SAM1)" in modelType
-        isSam1 = isSam1_by_filename or isSam1_by_type
+        base = os.path.basename(checkpoint_path or "").lower()
+        isSam1 = base.startswith("sam_")
+        isSam3 = base.startswith("sam3") or isSam3CheckpointPath(checkpoint_path)
 
         self.selPtsLbl.set_visible(segType in ["Selection"])
         self.selPtsEntry.set_visible(segType in ["Selection"])
         self.maskTypeLbl.set_visible(segType not in ["Auto"])
         self.maskTypeDropDown.set_visible(segType not in ["Auto"])
+        self.textPromptLbl.set_visible(isSam3)
+        self.textPromptEntry.set_visible(isSam3)
+        if isAuto:
+            self.textPromptLbl.set_text("Text Prompt (SAM3, required):")
+        else:
+            self.textPromptLbl.set_text("Text Prompt (SAM3, optional):")
 
-        # Show SAM2-specific options only for Auto mode and not SAM1
-        show_sam2_options = isAuto and not isSam1
+        # Minimum Mask Area is honoured by SAM2 and SAM3 Auto segmentation
+        show_mask_area = isAuto and not isSam1
+        self.minMaskAreaLbl.set_visible(show_mask_area)
+        self.minMaskAreaEntry.set_visible(show_mask_area)
+
+        # Segmentation Resolution / Crop n Layers are SAM2 only
+        show_sam2_options = isAuto and not isSam1 and not isSam3
         self.segResLbl.set_visible(show_sam2_options)
         self.segResDropDown.set_visible(show_sam2_options)
         self.cropNLayersLbl.set_visible(show_sam2_options)
         self.cropNLayersChk.set_visible(show_sam2_options)
-        self.minMaskAreaLbl.set_visible(show_sam2_options)
-        self.minMaskAreaEntry.set_visible(show_sam2_options)
+
+        # SAM3 Auto cannot run without a prompt: keep OK insensitive until one
+        # is typed. validateOptions() re-checks this after OK as a backstop.
+        prompt_missing = (
+            isSam3 and isAuto and not self.textPromptEntry.get_text().strip()
+        )
+        self.okBtn.set_sensitive(not prompt_missing)
 
     def on_random_toggled(self, widget):
         is_random = self.randColBtn.get_active()
@@ -272,10 +324,11 @@ class OptionsDialog(Gtk.Dialog):
     def get_values(self):
         self.values.pythonPath = self.pythonFileBtn.get_filename()
 
-        # Persist the full model type string for UI restoration
-        self.values.modelType = self.modelTypeVals[self.modelTypeDropDown.get_active()]
+        # No model type to pick: the bridge detects it from the checkpoint.
+        self.values.modelType = "auto"
 
         self.values.checkPtPath = self.checkPtFileBtn.get_filename()
+        self.values.textPrompt = self.textPromptEntry.get_text().strip()
         self.values.segType = self.segTypeVals[self.segTypeDropDown.get_active()]
         self.values.maskType = self.maskTypeVals[self.maskTypeDropDown.get_active()]
         if hasattr(self, "randColBtn"):
@@ -293,12 +346,9 @@ class OptionsDialog(Gtk.Dialog):
         self.values.minMaskArea = int(self.minMaskAreaEntry.get_text())
         self.values.persist(self.configFilePath)
 
-        # Return a copy with the parsed model type for the bridge script
+        # The bridge always runs in auto-detect mode.
         run_values = self.values
-        if run_values.modelType == "Auto":
-            run_values.modelType = "auto"
-        else:
-            run_values.modelType = run_values.modelType.split(" ")[0]
+        run_values.modelType = "auto"
 
         return run_values
 
@@ -537,6 +587,14 @@ def showError(message):
 
 
 def validateOptions(image, values):
+    if values.segType == "Auto" and checkpointIsSam3(values.checkPtPath):
+        if not (values.textPrompt or "").strip():
+            showError(
+                "A Text Prompt is required for Auto segmentation with a SAM3 model: "
+                "SAM3 only finds instances of the concepts you name "
+                "(e.g. 'person, chair')."
+            )
+            return False
     if values.segType in {"Selection", "Box"}:
         procedure = Gimp.get_pdb().lookup_procedure("gimp-selection-is-empty")
         config = procedure.create_config()
@@ -559,6 +617,36 @@ def configLogging(level):
         format="%(asctime)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+
+def runBridgeThreaded(cmd):
+    """Run the bridge subprocess off the main thread.
+
+    The worker touches no GIMP objects (subprocess I/O only) while the main
+    thread pulses an indeterminate progress bar. The pulses double as
+    responsiveness traffic, so GIMP drops its "plug-in is not responding"
+    warning during multi-minute model runs. Returns shellRun's boolean.
+    """
+    outcome = {}
+    done = threading.Event()
+
+    def _worker():
+        try:
+            outcome["ok"] = shellRun(cmd)
+        except Exception as e:  # never leave the main thread waiting silently
+            logging.exception("Bridge worker failed: %s", e)
+            outcome["ok"] = False
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_worker, name="segany-bridge", daemon=True)
+    thread.start()
+    Gimp.progress_init("Segment Anything: running the model (may take minutes)")
+    while not done.wait(0.2):
+        Gimp.progress_pulse()
+    thread.join()
+    Gimp.progress_end()
+    return outcome.get("ok", False)
 
 
 def run_segmentation(image, values):
@@ -608,13 +696,9 @@ def run_segmentation(image, values):
     if values.segType == "Auto":
         # Only add SAM2-specific args if the model is not SAM1
         # The bridge script knows to ignore them, but this is cleaner.
-        isSam1_by_type = values.modelType in ["vit_h", "vit_l", "vit_b"]
-        isSam1_by_filename = (
-            values.modelType == "auto"
-            and values.checkPtPath
-            and os.path.basename(values.checkPtPath).lower().startswith("sam_")
-        )
-        isSam1 = isSam1_by_type or isSam1_by_filename
+        isSam1 = values.checkPtPath and os.path.basename(
+            values.checkPtPath
+        ).lower().startswith("sam_")
         if not isSam1:
             cmd.extend(
                 [values.segRes, str(values.cropNLayers), str(values.minMaskArea)]
@@ -667,10 +751,20 @@ def run_segmentation(image, values):
     config = procedure.create_config()
     config.set_property("image", image)
     procedure.run(config)
-    shellRun(cmd)
+    if getattr(values, "textPrompt", ""):
+        cmd.append(f"--prompt={values.textPrompt}")
+    bridgeOk = runBridgeThreaded(cmd)
 
-    layerMaskColor = None if values.isRandomColor else values.maskColor
-    createLayers(image, maskFileNoExt, layerMaskColor, formatBinary, values)
+    maskFiles = glob.glob(maskFileNoExt + "*.seg")
+    if not bridgeOk or not maskFiles:
+        showError(
+            "Segment Anything produced no masks.\n\n"
+            "Check the GIMP console for the bridge output, and confirm the "
+            "Python3 Path environment holds the backend you need."
+        )
+    else:
+        layerMaskColor = None if values.isRandomColor else values.maskColor
+        createLayers(image, maskFileNoExt, layerMaskColor, formatBinary, values)
     cleanup(filepathPrefix)
 
     if channel is not None:
@@ -708,11 +802,12 @@ class SegAnyPlugin(Gimp.PlugIn):
 
         if response == Gtk.ResponseType.OK:
             values = dialog.get_values()
+            dialog.destroy()
             image.undo_group_start()
             run_segmentation(image, values)
             image.undo_group_end()
-
-        dialog.destroy()
+        else:
+            dialog.destroy()
 
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
